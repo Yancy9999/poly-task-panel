@@ -1,0 +1,20 @@
+[package]
+name = "poly-task-panel"
+version = "1.4.0"
+description = "Windows 多元任务面板 - WebView 壳"
+edition = "2021"
+
+[lib]
+name = "poly_task_panel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }
+
+[features]
+# 默认启用自定义协议（dev/release 都用 http://localhost，故实际未启用 custom-protocol）
+custom-protocol = ["tauri/custom-protocol"]

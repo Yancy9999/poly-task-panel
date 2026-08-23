@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"壳应用不需要前端调用任何 Tauri 命令，全部能力关闭。仅加载外部 http URL。","local":true,"windows":["main"],"permissions":[]}}

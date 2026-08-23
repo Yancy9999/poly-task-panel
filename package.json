@@ -1,0 +1,26 @@
+{
+  "name": "poly-task-panel",
+  "version": "1.4.0",
+  "description": "Windows 多元任务面板：web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树。",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "express": "^4.19.2",
+    "jsdom": "^29.1.1",
+    "node-pty": "^1.1.0",
+    "puppeteer-core": "^25.8.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}
