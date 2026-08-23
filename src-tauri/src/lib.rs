@@ -163,7 +163,7 @@ pub fn main() {
                 "main",
                 tauri::WebviewUrl::External(url.parse().unwrap()),
             )
-            .title("多元任务面板")
+            .title(format!("多元任务面板 v{}", app.config().version.as_deref().unwrap_or("0.0.0")))
             .inner_size(1100.0, 680.0)
             .min_inner_size(800.0, 500.0)
             .build()?;
