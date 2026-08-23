@@ -2,7 +2,7 @@
 
 > Windows 本地的多元任务面板：用 Web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树，并内置 Claude Code / Codex 交互式终端。
 
-版本：**1.4.0**
+版本：**1.4.1**
 
 ---
 

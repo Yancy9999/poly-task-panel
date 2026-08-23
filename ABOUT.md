@@ -1,6 +1,6 @@
 # PolyTaskPanel
 
-**版本**：1.4.0
+**版本**：1.4.1
 
 多元任务面板：可运行 SpringBoot / Node 项目，创建Claude Code / Codex会话。
 

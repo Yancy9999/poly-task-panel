@@ -34,7 +34,7 @@ window.WebSocket = class { constructor() {} send() {} close() {} };
 // 富 Terminal stub：createTerm 会调 loadAddon/open/onData/attachCustomKeyEventHandler；
 // renderPanes 的 fit/focus 都在 try/catch 内，缺方法也不抛。
 window.Terminal = class {
-  loadAddon() {} open() {} onData() {} attachCustomKeyEventHandler() {} dispose() {} focus() {}
+  loadAddon() {} open() {} onData() {} onTitleChange() {} attachCustomKeyEventHandler() {} dispose() {} focus() {}
 };
 window.FitAddon = { FitAddon: class { fit() {} loadAddon() {} } };
 window.HTMLElement.prototype.setPointerCapture = function () {};

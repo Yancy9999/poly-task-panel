@@ -144,6 +144,18 @@ function saveProjects(projects) {
 
 let projects = loadProjects();
 
+// id -> project 的索引，热路径（appendFileChain / flushPendingLogs / clearLogFile /
+// readLogHistory 每条日志都会查）用它 O(1) 取代 projects.find 的 O(n) 线性扫描。
+// 与 projects 数组同步维护：增删/重排/加载处都走 rebuildProjectsIndex。
+const projectsById = new Map();
+function rebuildProjectsIndex() {
+  projectsById.clear();
+  for (const p of projects) projectsById.set(p.id, p);
+}
+function getProject(id) {
+  return projectsById.get(id);
+}
+
 // 旧数据迁移：SpringBoot 项目缺少 compileDependencies 字段时按默认（勾选）补齐，
 // 并重新生成 start.bat，让"默认勾选"对既有项目也生效。
 let migrated = false;
@@ -154,18 +166,26 @@ for (const p of projects) {
   }
 }
 if (migrated) saveProjects(projects);
+rebuildProjectsIndex();
 
 // ---------------------------------------------------------------------------
-// 运行时进程注册表：projectId -> { proc, pid, buffer }
-// buffer 仅存当前 web 运行期间的输出；文件 start.log 落盘存全量历史。
+// 运行时进程注册表：projectId -> { proc, pid, pendingFlush }
+// 历史日志全量落盘到 start.log（readLogHistory 读文件尾部），无需内存缓冲。
 // ---------------------------------------------------------------------------
 const runs = new Map();
 
-// 文件写入串行链 + 清空 epoch：
-// appendFile 是异步的，writeFileSync 截断后飞行中的 appendFile 可能把旧日志写回文件
-// （清空后内容"又回来"）。用 promise 链串行化写入，清空时递增 epoch 让飞行中的旧写入失效。
+// 文件写入：批量缓冲 + 串行链 + 清空 epoch。
+// 高频日志下每块都 appendFile 会把磁盘写入与 promise 链变成瓶颈；
+// 改为每项目一个内存待写缓冲 pendingFlush，由定时器（每 FLUSH_INTERVAL_MS）
+// 批量落盘一次，把 N 次小写合并成 1 次。
+// 串行链仍保留：清空（clearLogFile）用 writeFileSync 截断，飞行中的 flush 可能把旧日志
+// 写回文件（清空后内容"又回来"）。故 flush 写盘前校验 epoch，清空时递增 epoch 让飞行中的旧写入失效。
 const logChains = new Map();
 const fileEpochs = new Map();
+const FLUSH_INTERVAL_MS = 200;
+// flush 计数器：每 FLUSH_SIZE_CHECK 次 flush 才 stat 一次文件大小做轮转检查，避免每次 flush 都 stat
+const FLUSH_SIZE_CHECK_EVERY = 50;
+const flushCounter = new Map();
 
 // 启动器产生的日志/脚本统一放在用户本地数据目录下，按项目 id 命名，
 // 不再写进项目目录 —— 否则会落在 Vite 的 watch 范围内，
@@ -187,15 +207,27 @@ function projectBatPath(projectId) {
 
 function ensureBuffer(projectId) {
   if (!runs.has(projectId)) {
-    runs.set(projectId, { proc: null, pid: null, buffer: [] });
+    runs.set(projectId, { proc: null, pid: null, pendingFlush: '' });
   }
   return runs.get(projectId);
 }
 
-// 串行追加到日志：同项目写入排队，避免清空时飞行中的 appendFile 写回旧内容
+// 追加到该项目的待写盘缓冲（不立即写盘）。由 flushPendingLogs 定时批量落盘。
+// 仅当项目存在时缓冲；清空（clearLogFile）会重置 epoch，flush 时据此丢弃过期内容。
 function appendFileChain(projectId, line) {
-  const p = projects.find((x) => x.id === projectId);
+  const p = getProject(projectId);
   if (!p) return Promise.resolve();
+  const rec = ensureBuffer(projectId);
+  rec.pendingFlush += line;
+  return Promise.resolve();
+}
+
+// 单项目待写缓冲落盘（串行链，配合清空 epoch 防止旧写入污染）。
+function flushProjectLog(projectId) {
+  const rec = runs.get(projectId);
+  if (!rec || !rec.pendingFlush) return Promise.resolve();
+  const line = rec.pendingFlush;
+  rec.pendingFlush = '';
   const logPath = projectLogPath(projectId);
   const epoch = fileEpochs.get(projectId) || 0;
   const prev = logChains.get(projectId) || Promise.resolve();
@@ -210,11 +242,49 @@ function appendFileChain(projectId, line) {
   return next;
 }
 
-// 同步清空文件，并让排队中的旧写入失效
+// 日志文件大小上限：超过 MAX_LOG_FILE_BYTES 时裁剪到尾部尾部 MAX_LOG_KEEP_BYTES，
+// 避免长跑项目日志文件无限膨胀。每 FLUSH_SIZE_CHECK_EVERY 次 flush 才 stat 一次，摊薄开销。
+const MAX_LOG_FILE_BYTES = 5 * 1024 * 1024;      // 5MB 触发裁剪
+const MAX_LOG_KEEP_BYTES = 256 * 1024;           // 裁剪后保留尾部 256KB
+function maybeRotateLog(projectId) {
+  const logPath = projectLogPath(projectId);
+  let st;
+  try { st = fs.statSync(logPath); } catch (e) { return; }
+  if (!st || st.size <= MAX_LOG_FILE_BYTES) return;
+  try {
+    const fd = fs.openSync(logPath, 'r');
+    const keep = Buffer.alloc(MAX_LOG_KEEP_BYTES);
+    const start = st.size - MAX_LOG_KEEP_BYTES;
+    fs.readSync(fd, keep, 0, MAX_LOG_KEEP_BYTES, start);
+    fs.closeSync(fd);
+    fs.writeFileSync(logPath, keep);
+  } catch (e) {}
+}
+
+// 定时批量落盘所有项目的待写缓冲
+function flushPendingLogs() {
+  for (const projectId of runs.keys()) {
+    const p = getProject(projectId);
+    if (!p) continue;
+    const cnt = (flushCounter.get(projectId) || 0) + 1;
+    flushCounter.set(projectId, cnt);
+    flushProjectLog(projectId).then(() => {
+      if (cnt % FLUSH_SIZE_CHECK_EVERY === 0) maybeRotateLog(projectId);
+    });
+  }
+}
+// unref：该定时器不阻止进程退出（否则测试/退出时事件循环被挂住）。
+// 真正退出时由 stopAllOnExit 同步 flush 残留缓冲，不依赖此定时器。
+const flushTimer = setInterval(flushPendingLogs, FLUSH_INTERVAL_MS);
+flushTimer.unref();
+
+// 同步清空文件，并让排队中的旧写入失效；同时丢弃内存待写缓冲（清空后不应再落旧内容）
 function clearLogFile(projectId) {
   fileEpochs.set(projectId, (fileEpochs.get(projectId) || 0) + 1);
-  const p = projects.find((x) => x.id === projectId);
+  const p = getProject(projectId);
   if (!p) return;
+  const rec = runs.get(projectId);
+  if (rec) rec.pendingFlush = '';
   const logPath = projectLogPath(projectId);
   try { fs.writeFileSync(logPath, '', 'utf-8'); } catch (e) {}
 }
@@ -222,26 +292,71 @@ function clearLogFile(projectId) {
 // ---------------------------------------------------------------------------
 // 日志：写文件 + 内存缓冲 + WebSocket 广播
 // ---------------------------------------------------------------------------
+// 广播批量缓冲：高频日志下每个 stdout chunk 都 broadcast 一次会让后端
+// JSON.stringify + ws.send 成为瓶颈（前端 rAF 批量渲染缓解的是下游 DOM 压力，
+// 上游这一环同样需要合并）。按项目累积 entries，由 broadcastFlushTimer
+// 每 BROADCAST_INTERVAL_MS 合并成一条 {type:'log-batch'} 广播。
+// status / session 等控制消息不合并，仍即时发。
+const pendingBroadcast = new Map();   // projectId -> entries[]
+const BROADCAST_INTERVAL_MS = 50;
+let broadcastFlushScheduled = false;
+function scheduleBroadcastFlush() {
+  if (broadcastFlushScheduled) return;
+  broadcastFlushScheduled = true;
+  // 用 setTimeout 而非 setInterval：每次窗口起算自首条到达，避免空转，
+  // 也让窗口自然贴合突发流量。unref 不阻止进程退出。
+  const t = setTimeout(flushBroadcast, BROADCAST_INTERVAL_MS);
+  if (t.unref) t.unref();
+}
+function flushBroadcast() {
+  broadcastFlushScheduled = false;
+  if (!pendingBroadcast.size) return;
+  for (const [projectId, entries] of pendingBroadcast) {
+    if (entries.length) {
+      broadcast({ type: 'log-batch', projectId, entries });
+      entries.length = 0;
+    }
+  }
+}
+
 function appendLog(projectId, line) {
   const entry = { ts: Date.now(), line };
-  const rec = ensureBuffer(projectId);
-  rec.buffer.push(entry);
-  // 内存缓冲上限，避免长跑项目无限增长（文件里有全量）
-  if (rec.buffer.length > 5000) rec.buffer.shift();
+  ensureBuffer(projectId);
 
   // 落盘（串行链，配合清空 epoch 防止旧写入污染）
   appendFileChain(projectId, line);
 
-  // 广播给正在看该项目的客户端
-  broadcast({ type: 'log', projectId, entry });
+  // 广播给正在看该项目的客户端：累积进批量缓冲，下一窗口合并发一条 log-batch
+  let entries = pendingBroadcast.get(projectId);
+  if (!entries) { entries = []; pendingBroadcast.set(projectId, entries); }
+  entries.push(entry);
+  scheduleBroadcastFlush();
 }
 
+// 历史日志只读尾部 MAX_HISTORY_BYTES，避免大文件同步读冻结事件循环 +
+// 前端渲染巨量节点。小文件（≤ 阈值）整读，保持原行为。仍按 64KB 块切。
+const MAX_HISTORY_BYTES = 256 * 1024;
 function readLogHistory(projectId) {
-  const p = projects.find((x) => x.id === projectId);
+  const p = getProject(projectId);
   if (!p) return [];
   const logPath = projectLogPath(projectId);
   try {
-    const raw = fs.readFileSync(logPath, 'utf-8');
+    let raw;
+    let st;
+    try { st = fs.statSync(logPath); } catch (e2) {
+      if (e2.code === 'ENOENT') return [];
+      throw e2;
+    }
+    if (st.size > MAX_HISTORY_BYTES) {
+      // 只读尾部 MAX_HISTORY_BYTES：用 fd 定位偏移读取
+      const fd = fs.openSync(logPath, 'r');
+      const buf = Buffer.alloc(MAX_HISTORY_BYTES);
+      fs.readSync(fd, buf, 0, MAX_HISTORY_BYTES, st.size - MAX_HISTORY_BYTES);
+      fs.closeSync(fd);
+      raw = buf.toString('utf-8');
+    } else {
+      raw = fs.readFileSync(logPath, 'utf-8');
+    }
     // 按 64KB 块切，避免单条过大；每块作为一条历史 entry
     const entries = [];
     const CHUNK = 65536;
@@ -290,6 +405,14 @@ function stopProject(projectId) {
 
 // web 服务退出时：对所有在跑项目走一遍递归杀，确保不残留孤儿进程
 function stopAllOnExit() {
+  // 退出前同步 flush 残留的待写日志缓冲，避免最后一批日志丢失
+  for (const projectId of runs.keys()) {
+    const rec = runs.get(projectId);
+    if (rec && rec.pendingFlush) {
+      try { fs.appendFileSync(projectLogPath(projectId), rec.pendingFlush); } catch (e) {}
+      rec.pendingFlush = '';
+    }
+  }
   for (const [projectId, rec] of runs) {
     if (rec.pid) {
       try { exec(`taskkill /T /F /PID ${rec.pid}`); } catch (e) {}
@@ -378,7 +501,7 @@ function sanitizeTerminalEnv(baseEnv) {
 // 创建一个终端会话（claude / codex）：spawn 真 PTY，cwd = 宿主项目 projectPath。
 function createTerminalSession(projectId, type) {
   const cfg = TERMINAL_TYPES[type];
-  const p = projects.find((x) => x.id === projectId);
+  const p = getProject(projectId);
   if (!p) return { ok: false, msg: '项目不存在' };
   if (!pty) return { ok: false, msg: `node-pty 未加载，${type} 终端不可用` };
   if (!fs.existsSync(p.projectPath)) {
@@ -455,7 +578,7 @@ process.on('SIGTERM', () => { stopAllPtyOnExit(); process.exit(0); });
 // 启动项目
 // ---------------------------------------------------------------------------
 function startProject(projectId) {
-  const p = projects.find((x) => x.id === projectId);
+  const p = getProject(projectId);
   if (!p) return { ok: false, msg: '项目不存在' };
   // Folder 类型不可启动（前端已隐藏按钮，这里兜底）
   if (p.type === 'folder') return { ok: false, msg: 'Folder 类型不支持启动' };
@@ -558,16 +681,18 @@ for (const p of projects) {
 // ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json());
-app.use(express.static(PUBLIC_DIR));
+// 静态资源带短期缓存：开发期 1d，减少重复请求的重新验证。
+const staticOpts = { maxAge: '1d' };
+app.use(express.static(PUBLIC_DIR, staticOpts));
 
 // xterm.js 静态资源：前端从 /vendor/xterm/ 加载 xterm.css / xterm.js，
 // 从 /vendor/xterm-addon-fit/ 加载 addon-fit.js。直接映射 node_modules 下的包目录。
 // （打包时 node_modules 进 resources，release 下路径同样有效。）
 app.use('/vendor/xterm', express.static(
-  path.join(ROOT_DIR, 'node_modules', '@xterm', 'xterm')
+  path.join(ROOT_DIR, 'node_modules', '@xterm', 'xterm'), staticOpts
 ));
 app.use('/vendor/xterm-addon-fit', express.static(
-  path.join(ROOT_DIR, 'node_modules', '@xterm', 'addon-fit')
+  path.join(ROOT_DIR, 'node_modules', '@xterm', 'addon-fit'), staticOpts
 ));
 
 // 关于页内容源：根目录 ABOUT.md（前端 fetch 后本地渲染 markdown）。
@@ -678,13 +803,14 @@ app.post('/api/projects', (req, res) => {
   };
   projects.push(p);
   saveProjects(projects);
+  projectsById.set(p.id, p);
   writeBat(p);
   res.json({ ok: true, project: p });
 });
 
 // 编辑项目（覆盖重写 bat + 更新 projects.json）
 app.put('/api/projects/:id', (req, res) => {
-  const p = projects.find((x) => x.id === req.params.id);
+  const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   const { name, projectPath, type, command, moduleName, compileDependencies } = req.body || {};
   const rec = runs.get(p.id);
@@ -722,6 +848,7 @@ app.post('/api/projects/reorder', (req, res) => {
   const ordered = ids.map((id) => byId.get(id));
   projects = ordered;
   saveProjects(projects);
+  rebuildProjectsIndex();
   res.json({ ok: true });
 });
 
@@ -735,7 +862,9 @@ app.delete('/api/projects/:id', async (req, res) => {
   deleteBatAndLog(p);
   projects.splice(idx, 1);
   saveProjects(projects);
+  projectsById.delete(p.id);
   runs.delete(p.id);
+  pendingBroadcast.delete(p.id); // 清理待广播缓冲，避免对已删项目 flush 出孤儿消息
   res.json({ ok: true });
 });
 
@@ -763,14 +892,14 @@ app.post('/api/projects/:id/restart', async (req, res) => {
 
 // 查看命令：返回启动器为该项目生成的 start.bat 内容（即实际执行的 cmd 命令）
 app.get('/api/projects/:id/command', (req, res) => {
-  const p = projects.find((x) => x.id === req.params.id);
+  const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   res.json({ ok: true, command: generateBat(p) });
 });
 
 // 打开资源管理器：在项目目录打开一个 Windows 资源管理器窗口
 app.post('/api/projects/:id/explorer', (req, res) => {
-  const p = projects.find((x) => x.id === req.params.id);
+  const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   const dir = p.projectPath;
   if (!fs.existsSync(dir)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + dir });
@@ -790,17 +919,18 @@ app.post('/api/projects/:id/explorer', (req, res) => {
 // 但 fileHistory 按 64KB 块切、memBuffer 按行切，两者计量单位不一致，
 // 导致切换项目时大部分内存内容与文件历史重复输出。
 app.get('/api/projects/:id/logs', (req, res) => {
-  const p = projects.find((x) => x.id === req.params.id);
+  const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   res.json({ ok: true, entries: readLogHistory(p.id) });
 });
 
-// 清空日志：内存缓冲 + start.log 落盘文件一并清空
+// 清空日志：start.log 落盘文件 + 待广播缓冲一并清空
 app.post('/api/projects/:id/clear-logs', (req, res) => {
-  const p = projects.find((x) => x.id === req.params.id);
+  const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
-  const rec = runs.get(p.id);
-  if (rec) rec.buffer = [];
+  // 丢弃待广播的旧条目，否则清空后下一窗口仍会 flush 出一批旧日志
+  const pending = pendingBroadcast.get(p.id);
+  if (pending) pending.length = 0;
   clearLogFile(p.id);
   res.json({ ok: true });
 });
@@ -816,7 +946,7 @@ for (const type of ['claude', 'codex', 'cmd', 'pi']) {
 
   // 列出某项目下的活跃终端会话
   app.get(base, (req, res) => {
-    const p = projects.find((x) => x.id === req.params.id);
+    const p = getProject(req.params.id);
     if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
     const list = [];
     for (const [sessionId, rec] of ptySessions) {

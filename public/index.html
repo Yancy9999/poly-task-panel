@@ -670,15 +670,17 @@ function loadLogPaneLayout() {
   try { return JSON.parse(localStorage.getItem(LOG_PANE_LAYOUT_KEY)); } catch (e) { return null; }
 }
 // 恢复终端会话持久化布局（栏数 + 每栏项目视图 + 激活栏）；数据缺失/损坏/越界一律兜底单栏空白。
-// empty 直接恢复；字符串按会话 sessionId（c_/x_ 前缀）恢复，保留 projectId 供刷新后重连判定。
+// empty 直接恢复；字符串按会话 sessionId 恢复，保留 projectId 供刷新后重连判定。
+// 前缀字符类从 TERM_TYPE_META 动态构建，新增会话类型（c_/x_/m_/i_…）无需改这里。
 function restorePaneLayout() {
   const saved = loadPaneLayout();
   if (saved && Array.isArray(saved.panes) && saved.panes.length) {
     const n = Math.min(saved.panes.length, MAX_PANES);
+    const sessionRe = new RegExp('^[' + Object.values(TERM_TYPE_META).map(m => m.prefix[0]).join('') + ']_\\d+$');
     panes = [];
     for (let i = 0; i < n; i++) {
       const sp = saved.panes[i] || {};
-      const isSession = typeof sp.view === 'string' && /^[cx]_\d+$/.test(sp.view);
+      const isSession = typeof sp.view === 'string' && sessionRe.test(sp.view);
       const view = isSession ? sp.view : 'empty';
       panes.push({ id: nextPaneId(), projectId: view === 'empty' ? null : (sp.projectId || null), view });
     }
@@ -735,10 +737,19 @@ function connectWS() {
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.type === 'log') {
-      // 宿主日志实时流：遍历日志抽屉中所有显示该项目日志的栏（非激活栏也要实时更新），各自 append 到自己的缓冲。
+    if (msg.type === 'log-batch' || msg.type === 'log') {
+      // 宿主日志实时流：后端按项目批量合并（每 ~50ms 一条 log-batch，entries[]），
+      // 旧版单条 log 仍兼容。遍历日志抽屉中所有显示该项目日志的栏（非激活栏也要实时更新），
+      // 逐条 append 到自己的缓冲，由前端 rAF 管线统一批量渲染。
+      // 直接遍历 entries 取 .line，不为单条 log 预先 map 出中间数组。
       logPanes.forEach(p => {
-        if (p.view === 'log' && p.projectId === msg.projectId) appendLog(p.id, msg.entry.line);
+        if (p.view === 'log' && p.projectId === msg.projectId) {
+          if (msg.type === 'log-batch') {
+            for (const e of msg.entries) appendLog(p, e.line);
+          } else {
+            appendLog(p, msg.entry.line);
+          }
+        }
       });
     } else if (msg.type === 'status') {
       updateProjectStatus(msg.projectId, msg.running, msg.pid);
@@ -1085,7 +1096,14 @@ function fitAndResize() {
     syncPtyResize(s, p.view);
   });
 }
-window.addEventListener('resize', fitAndResize);
+// 去抖 fit：窗口/侧栏/抽屉拖拽期间会高频触发 resize，逐次 fit + POST resize 会风暴。
+// 合并到拖拽停下后一次性 fit。直接调用 fitAndResize 的入口（reconnect 等）走此去抖。
+let fitResizeTimer = null;
+function scheduleFitAndResize() {
+  if (fitResizeTimer) clearTimeout(fitResizeTimer);
+  fitResizeTimer = setTimeout(() => { fitResizeTimer = null; fitAndResize(); }, 120);
+}
+window.addEventListener('resize', scheduleFitAndResize);
 
 // 把 xterm 真实 cols/rows 同步给后端 PTY，确保两端尺寸一致。
 function syncPtyResize(s, sessionId) {
@@ -1819,8 +1837,8 @@ function ansiToHtml(text) {
   let css = [];
   function emit(str) {
     if (!str) return;
-    let esc = '';
-    for (const ch of str) esc += ch==='&'?'&amp;':ch==='<'?'&lt;':ch==='>'?'&gt;':ch;
+    // 单次正则替换转义 &< >，热路径下比逐字符拼接快
+    const esc = str.replace(/[&<>]/g, c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;');
     out += css.length ? `<span style="${css.join(';')}">${esc}</span>` : esc;
   }
   const re = /\x1b\[([0-9;]*)m/g;
@@ -1846,10 +1864,17 @@ function ansiToHtml(text) {
 
 // 子进程输出是流式分块到达的，一个 ANSI 序列可能被拆成两段
 // （比如先收到 \x1b[3 再收到 2m）。缓冲末尾未完成的序列，等下一段凑齐再渲染。
-// 已按栏独立：ansiBuffers（Map paneId -> 未完成序列）。appendLog(paneId, text) 追加到指定栏。
-function appendLog(paneId, text) {
-  const p = logPanes.find(x => x.id === paneId);
-  if (!p) return;
+// 已按栏独立：ansiBuffers（Map paneId -> 未完成序列）。appendLog(pane, text) 追加到指定栏。
+//
+// 批量渲染：高频日志下每块都创建 <span> + 强制 reflow 会卡死页面。
+// appendLog 只把可渲染文本累积进 pendingRender（按栏独立），标记该栏 dirty，
+// 由 scheduleLogFlush 在下一帧一次性把累积内容合并渲染（少数 span），并按 DOM 上限裁剪旧节点。
+// 直接接收 pane 对象（调用方已持有），免去每条日志一次 logPanes.find 线性查找。
+const pendingRender = new Map();   // paneId -> 累积的待渲染文本
+const logDirty = new Set();        // 待 flush 的栏 id
+const MAX_LOG_SPANS = 2000;        // 单栏 DOM 子节点上限，超出从头部批量删
+function appendLog(p, text) {
+  const paneId = p.id;
   let buf = paneBuffer(paneId);
   buf += text;
   const pending = buf.match(/\x1b\[[0-9;]*$/);
@@ -1863,20 +1888,49 @@ function appendLog(paneId, text) {
   }
   ansiBuffers.set(paneId, toKeep);
   if (!toRender) return;
-  appendLogLine(paneId, toRender);
+  // 累积到待渲染缓冲，标记 dirty，下一帧统一 flush
+  pendingRender.set(paneId, (pendingRender.get(paneId) || '') + toRender);
+  logDirty.add(paneId);
+  scheduleLogFlush();
+}
+
+let logFlushScheduled = false;
+function scheduleLogFlush() {
+  if (logFlushScheduled) return;
+  logFlushScheduled = true;
+  requestAnimationFrame(flushPendingRender);
+}
+// 一次性把所有 dirty 栏的累积文本渲染进 DOM，并裁剪超限节点 + 智能滚动。
+// 合并高频流式块为单次 DOM 写入，避免每块一次 reflow。
+function flushPendingRender() {
+  logFlushScheduled = false;
+  for (const paneId of logDirty) {
+    const text = pendingRender.get(paneId);
+    pendingRender.set(paneId, '');
+    if (text) appendLogLine(paneId, text);
+  }
+  logDirty.clear();
 }
 
 // 把一段已编码的日志文本追加渲染到某栏日志容器（不动缓冲）。作用域为日志抽屉容器。
+// 渲染后按 MAX_LOG_SPANS 裁剪旧节点，且仅在用户已贴底时自动滚动（向上查看历史时不被打断）。
 function appendLogLine(paneId, toRender) {
   const logEl = document.getElementById('logConsoleBody').querySelector(`.pane-log[data-log-pane="${paneId}"]`);
   if (!logEl) return;
+  // 智能滚动：渲染前判断是否贴底，贴底才渲染后自动滚到底
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
   // 清除占位符
   const placeholder = logEl.querySelector('.placeholder');
   if (placeholder) placeholder.remove();
   const span = document.createElement('span');
   span.innerHTML = ansiToHtml(toRender);
   logEl.appendChild(span);
-  logEl.scrollTop = logEl.scrollHeight;
+  // DOM 上限：超出时从头部批量删除一批旧节点，防止长跑日志无限膨胀
+  const overflow = logEl.children.length - MAX_LOG_SPANS;
+  if (overflow > 0) {
+    for (let i = 0; i < overflow; i++) logEl.removeChild(logEl.firstChild);
+  }
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
 // 日志分栏右上角控制按钮（启动/停止/重启）禁用态原地更新。
@@ -2449,7 +2503,7 @@ function setSidebarCollapsed(collapsed) {
   localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
   applySidebarState();
   renderList();   // 重渲染：折叠态只显示头像图标
-  fitAndResize(); // 侧栏宽度变化 → 右侧 console 变宽，重新 fit xterm + 同步 PTY
+  scheduleFitAndResize(); // 侧栏宽度变化 → 右侧 console 变宽，重新 fit xterm + 同步 PTY
 }
 
 // 拖拽分隔条调宽：pointer capture 防止拖出丢失；结束写入 localStorage 并 fit。
@@ -2481,7 +2535,7 @@ function setSidebarCollapsed(collapsed) {
     sb.classList.remove('dragging');
     localStorage.setItem('sidebarWidth', String(sidebarWidth));
     sb.style.width = sidebarWidth + 'px';
-    fitAndResize();
+    scheduleFitAndResize();
   };
   resizer.addEventListener('pointerup', endDrag);
   resizer.addEventListener('pointercancel', endDrag);
@@ -2504,8 +2558,8 @@ function applyLogDrawerState() {
   else c.style.removeProperty('--log-drawer-h');
 }
 function fitAfterDrawer() {
-  // transition 期间布局在变，双 rAF 确保量到终态
-  requestAnimationFrame(() => requestAnimationFrame(fitAndResize));
+  // transition 期间布局在变，去抖等过渡稳定后一次性 fit（替代双 rAF，合并高频触发）
+  scheduleFitAndResize();
 }
 function openLogDrawer() {
   if (logDrawerOpen) return;

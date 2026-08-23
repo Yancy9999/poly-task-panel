@@ -113,7 +113,7 @@ function assert(cond, msg) {
   let listHtml = doc.getElementById('sidebarList').innerHTML;
   assert(listHtml.includes('class="avatar"'), '展开态渲染 avatar 节点');
   assert(listHtml.includes('>裕租后台<'), '展开态渲染项目名文本');
-  assert(listHtml.includes('新建 Claude'), '展开态保留新建 Claude 按钮');
+  assert(listHtml.includes('新建 claude 会话'), '展开态保留新建 claude 会话按钮');
   // 合并：会话区块应为项目卡片内部子区域（非独立兄弟节点）
   const firstCard = doc.querySelector('#sidebarList .project-item');
   const termBlock = firstCard && firstCard.querySelector(':scope > .term-block');
