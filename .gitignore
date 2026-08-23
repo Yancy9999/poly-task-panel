@@ -1,0 +1,30 @@
+/node_modules/
+
+# Tauri / Rust 编译产物（数百 MB）
+src-tauri/target/
+
+# Rust
+**/*.rs.bk
+
+# 图标源（保留生成的 icons/，但 source.png 是占位可删）
+src-tauri/icons/source.png
+
+# 运行时产物（已迁出项目目录，此处为兜底，防止旧布局残留被误提交）
+/logs/
+/temp/
+
+# 打包用的固定版本 node 二进制（fetch-node.js 下载，约 87MB，不入库）
+# 但保留 README.txt 让目录存在，否则 dev 构建的 resources 校验会失败
+src-tauri/bundled-node/*
+!src-tauri/bundled-node/README.txt
+
+# 临时产物
+check_tmp.js
+diag5.tmp.js
+
+# 本地运行时数据（启动器项目配置，含本机路径）
+projects.json
+
+# 本地草稿 / 临时复现脚本（不随源码入库）
+.scratch/
+.tmp-repro/
