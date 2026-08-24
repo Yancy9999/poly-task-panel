@@ -35,7 +35,7 @@
       "allowDowngrades": true,
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["zh-CN"]
+        "languages": ["SimpChinese"]
       },
       "wix": {
         "language": ["zh-CN"]
