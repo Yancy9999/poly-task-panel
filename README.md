@@ -1,8 +1,8 @@
 # PolyTaskPanel
 
-> Windows 本地的多元任务面板：用 Web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树，并内置 Claude Code / Codex 交互式终端。
+> Windows 本地的多元任务面板：用 Web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树，并内置 Claude Code / Codex / pi 交互式终端。
 
-版本：**1.4.1**
+版本：**1.5.0**
 
 ---
 
@@ -33,9 +33,11 @@
   - **Node**：自定义启动命令（如 `pnpm run dev`）。
   - **Folder**：仅作为目录容器，不启动脚本，用于挂载终端会话。
 - **内置终端会话**：基于真 PTY（`node-pty`）+ `xterm.js`，在项目目录里开交互式终端：
-  - **Claude Code** / **Codex**：完整 TUI 可用（光标、清屏、Alt 屏、颜色）。
+  - **Claude Code** / **Codex** / **pi**：完整 TUI 可用（光标、清屏、Alt 屏、颜色）。
   - **cmd**：普通 Windows cmd shell。
-- **侧栏可折叠**：侧栏宽度可拖拽调整，并可折叠为图标列。
+- **文件目录浏览**：右侧抽屉懒加载项目目录树，可折叠 / 拖拽调宽；支持在资源管理器中打开目录。
+- **多栏分屏**：主区 1~4 栏并列，可同时查看多个会话 / 日志。
+- **侧栏可折叠**：侧栏宽度可拖拽调整，并可折叠为图标列；侧栏顶部支持一键全部折叠 / 全部展开项目卡片。
 - **文件夹选择**：原生文件夹选择对话框，免手填路径。
 - **可选桌面壳**：Tauri 打包成原生 Windows 应用，自带 WebView2 窗口与 NSIS 安装包。
 
@@ -61,7 +63,7 @@
 - **Node.js**：建议 LTS 版本。
   - `node-pty` 为 native C++ addon，安装时需编译环境（Windows 上需 Visual Studio Build Tools / Python），其 ABI 必须与运行它的 Node 一致。
 - **（仅打包需要）Rust 工具链**：`cargo` 需在 PATH 中（`dev.bat` / `build.bat` 会把 `%USERPROFILE%\.cargo\bin` 加入 PATH）。
-- **（按需）外部 CLI**：`claude`、`codex`、`mvn`、`pnpm` 等需自行安装并加入 PATH。
+- **（按需）外部 CLI**：`claude`、`codex`、`pi`、`mvn`、`pnpm` 等需自行安装并加入 PATH。
 
 ---
 
@@ -87,7 +89,7 @@ npm start
 2. 填写名称、选择类型（SpringBoot / Node / Folder）。
 3. 用「选择文件夹」指定项目路径。
 4. SpringBoot 填模块名（`moduleName`），可选「编译依赖模块」；Node 填启动命令。
-5. 保存后即可在卡片上启动 / 停止 / 查看日志，或在项目目录里开 Claude / Codex 终端。
+5. 保存后即可在卡片上启动 / 停止 / 查看日志，或在项目目录里开 Claude / Codex / pi / cmd 终端。
 
 ---
 
@@ -132,10 +134,12 @@ npm run tauri:build
 | `CLAUDE_ARGS` | （空） | Claude 终端的额外参数，空格分隔。 |
 | `CODEX_BIN` | `codex` | Codex 终端调用的可执行文件。 |
 | `CODEX_ARGS` | `-a never` | Codex 终端的额外参数；设了则整体覆盖默认值。 |
+| `PI_BIN` | `pi` | pi 终端调用的可执行文件。 |
+| `PI_ARGS` | （空） | pi 终端的额外参数，空格分隔。 |
 | `PROJECTS_FILE` | `./projects.json` | 项目列表持久化文件路径。测试时常用临时目录避免污染真实数据。 |
 | `PUBLIC_DIR` | `./public` | 静态前端目录。 |
 
-> `node-pty` 加载失败时不致命：Claude / Codex 终端功能不可用，但启动器其余功能照常。创建会话时会返回明确错误。
+> `node-pty` 加载失败时不致命：Claude / Codex / pi 终端功能不可用，但启动器其余功能照常。创建会话时会返回明确错误。
 
 ---
 
@@ -182,11 +186,13 @@ PolyTaskPanel/
 | `GET` | `/api/projects/:id/command` | 获取启动命令 |
 | `GET` | `/api/projects/:id/logs` | 获取日志 |
 | `POST` | `/api/projects/:id/clear-logs` | 清空日志 |
+| `POST` | `/api/projects/:id/explorer` | 在资源管理器中打开项目（或子）目录 |
+| `GET` | `/api/projects/:id/files` | 列出项目目录的一层条目（供文件浏览抽屉懒加载树） |
 | `POST` | `/api/pick-folder` | 原生文件夹选择对话框 |
 
 ### 终端会话
 
-`:type` 路径段为 `claude-sessions` / `codex-sessions` / `cmd-sessions` 之一。
+`:type` 路径段为 `claude-sessions` / `codex-sessions` / `cmd-sessions` / `pi-sessions` 之一。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -195,7 +201,7 @@ PolyTaskPanel/
 | `DELETE` | `/api/projects/:id/:type/:sessionId` | 关闭终端会话（杀进程树） |
 | `POST` | `/api/projects/:id/:type/:sessionId/resize` | 调整 PTY 尺寸（cols/rows） |
 
-终端输入输出通过 WebSocket 双向流式传输，消息类型按终端区分（如 `claude-output` / `claude-input` / `claude-session`，Codex / cmd 同理）。
+终端输入输出通过 WebSocket 双向流式传输，消息类型按终端区分（如 `claude-output` / `claude-input` / `claude-session`，Codex / cmd / pi 同理）。
 
 ### 其他
 
@@ -213,7 +219,7 @@ PolyTaskPanel/
 npm test
 ```
 
-覆盖 Claude / Codex 会话契约、面板共存与持久化、重连、侧栏缩放折叠等场景。
+覆盖 Claude / Codex / pi 会话契约、资源管理器与文件目录路由、面板共存与持久化、重连、侧栏缩放折叠等场景。
 
 ---
 

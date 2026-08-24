@@ -24,6 +24,7 @@
   .sidebar.collapsed + .sidebar-resizer { pointer-events: none; opacity: 0; }
   /* 侧栏顶部工具栏：左侧放折叠切换按钮，右侧放"新建项目"按钮 */
   .sidebar-header { padding: 10px 12px; border-bottom: 1px solid #f2f3f5; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  .sidebar-header .sidebar-tools { display: flex; align-items: center; gap: 2px; }
   .sidebar-header .collapse-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; color: #86909c; border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: background .15s, color .15s; }
   .sidebar-header .collapse-btn:hover { background: #f2f3f5; color: #4e5969; }
   .sidebar-header .collapse-btn svg { width: 17px; height: 17px; transition: transform .18s ease; }
@@ -56,7 +57,9 @@
   .sidebar.collapsed .project-item.active:hover .avatar { box-shadow: none; }
   /* 折叠态整栏结构：仅图标列，隐藏文本/操作/会话区块 */
   .sidebar.collapsed .sidebar-header { justify-content: center; padding: 10px 0; }
-  .sidebar.collapsed .sidebar-header .create-btn { display: none; }
+  .sidebar.collapsed .sidebar-header .create-btn,
+  .sidebar.collapsed .sidebar-header .collapse-all-btn,
+  .sidebar.collapsed .sidebar-header .expand-all-btn { display: none; }
   .sidebar.collapsed .sidebar-list { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
   .sidebar.collapsed .project-item { margin: 0; padding: 8px 0; border: none; border-radius: 0; align-items: center; background: transparent; }
   .sidebar.collapsed .project-item.active { border-left: none; padding-left: 0; background: transparent; }
@@ -227,6 +230,11 @@
   .pane-context-menu button:hover { background: #f2f3f5; }
   .pane-context-menu button:disabled { color: #c9cdd4; cursor: not-allowed; }
   .pane-context-menu button:disabled:hover { background: none; }
+  /* 文件树右键菜单：深色样式（与文件抽屉同色系 #1d1f21/#2a2e33） */
+  .file-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.4); padding: 4px; display: none; }
+  .file-context-menu.show { display: block; }
+  .file-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
+  .file-context-menu button:hover { background: #3a3c3f; }
   .confirm-modal p { font-size: 13px; color: #4e5969; line-height: 1.7; white-space: pre-line; margin-bottom: 18px; }
   /* 命令查看模态框 */
   .cmd-modal { width: 640px; max-width: 90vw; }
@@ -278,6 +286,9 @@
   .pane-header .pane-tools .pane-split { border: 1px solid #e5e6eb; background: #fff; color: #1f2329; }
   .pane-header .pane-tools .pane-split:hover:not(:disabled) { border-color: #165dff; background: #f2f3f5; color: #165dff; }
   .pane-header .pane-tools .pane-split:disabled { opacity: .4; }
+  /* 文件目录浏览按钮：与分栏按钮同款白底描边高亮，但不参与分栏满栏禁用态 */
+  .pane-header .pane-tools .pane-file { border: 1px solid #e5e6eb; background: #fff; color: #1f2329; }
+  .pane-header .pane-tools .pane-file:hover { border-color: #165dff; background: #f2f3f5; color: #165dff; }
   .pane-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   /* 日志面板：每栏独立实例，铺满本栏 body */
   .pane-log { position: absolute; inset: 0; overflow-y: auto; padding: 10px 16px; box-sizing: border-box; }
@@ -366,6 +377,50 @@
   .console:not(.log-drawer-open) .log-drawer-pin { display: none; }
   /* 抽屉内分栏区：与终端区 console-body 同结构同样式（复用 .pane/.pane-header/.pane-log） */
   .log-drawer-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: row; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; }
+  /* ---------- 文件目录浏览抽屉（右侧可折叠） ----------
+     与底部日志抽屉同构：贴在 .console 右侧边缘，可折叠/可拖拽调宽/浮动叠层。
+     .main 已是 flex row（sidebar + resizer + console）；抽屉作为 .console 的子层用
+     absolute 浮在右侧，不破坏现有 flex 流（console-body 仍占满），展开时带阴影叠层。 */
+  .file-drawer-resizer { position: absolute; top: 0; bottom: 0; right: var(--file-drawer-w, 280px); width: 8px; margin-right: -4px; cursor: col-resize; z-index: 26; display: none; }
+  .file-drawer-resizer::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); width: 3px; border-radius: 2px; background: transparent; transition: background .15s; }
+  .file-drawer-resizer:hover::before, .file-drawer-resizer.dragging::before { background: #165dff; }
+  .console.file-drawer-open .file-drawer-resizer { display: block; }
+  .file-drawer { position: absolute; top: 0; bottom: 0; right: 0; width: var(--file-drawer-w, 280px); background: #1d1f21; border-left: 1px solid #3a3c3f; box-shadow: -6px 0 18px rgba(0,0,0,.35); display: flex; flex-direction: column; z-index: 24; transform: translateX(100%); transition: transform .18s ease, width .18s ease; overflow: hidden; }
+  .console.file-drawer-open .file-drawer { transform: translateX(0); }
+  .file-drawer.dragging { transition: none !important; }
+  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
+  .file-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .file-drawer-header .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .file-drawer-header .pane-btn:disabled:hover { background: transparent; color: #86909c; }
+  .file-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
+  /* 面包屑：当前根项目 + 展开的层级路径；超长横向滚动 */
+  .file-drawer-breadcrumb { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 6px 10px; background: #1d1f21; border-bottom: 1px solid #2a2e33; font-size: 11px; color: #86909c; overflow-x: auto; white-space: nowrap; }
+  .file-drawer-breadcrumb::-webkit-scrollbar { height: 4px; }
+  .file-drawer-breadcrumb .crumb { cursor: pointer; color: #79a8ff; padding: 2px 4px; border-radius: 3px; flex-shrink: 0; }
+  .file-drawer-breadcrumb .crumb:hover { background: #2a2e33; }
+  .file-drawer-breadcrumb .crumb.cur { color: #e3e3e3; cursor: default; }
+  .file-drawer-breadcrumb .sep { color: #4e5969; flex-shrink: 0; }
+  /* 树容器：纵向滚动，每行缩进按 depth */
+  .file-drawer-tree { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; line-height: 1.5; color: #e3e3e3; }
+  .file-drawer-tree::-webkit-scrollbar { width: 8px; }
+  .file-drawer-tree::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
+  .file-tree-row { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; cursor: default; user-select: none; white-space: nowrap; }
+  .file-tree-row:hover { background: #2a2e33; }
+  .file-tree-row.selected { background: #2a3a4f; }
+  .file-tree-row .twisty { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: #86909c; transition: transform .12s ease; }
+  .file-tree-row .twisty svg { width: 12px; height: 12px; display: block; }
+  .file-tree-row.expanded .twisty { transform: rotate(90deg); }
+  .file-tree-row .twisty.empty { visibility: hidden; }
+  .file-tree-row .ico { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+  .file-tree-row .ico svg { width: 15px; height: 15px; display: block; }
+  .file-tree-row .ico.folder { color: #f7ba32; }
+  .file-tree-row .ico.file { color: #86909c; }
+  .file-tree-row .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-tree-children { overflow: hidden; }
+  .file-tree-empty { padding: 30px 16px; color: #6b6d70; font-size: 12px; text-align: center; font-style: italic; }
+  .file-tree-loading { padding: 14px 16px; color: #6b6d70; font-size: 12px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -373,7 +428,11 @@
 <div class="main">
   <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <button class="collapse-btn" id="collapseBtn" title="折叠侧栏" onclick="toggleSidebar()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></button>
+      <div class="sidebar-tools">
+        <button class="collapse-btn" id="collapseBtn" title="折叠侧栏" onclick="toggleSidebar()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></button>
+        <button class="collapse-btn collapse-all-btn" title="全部折叠项目卡片" onclick="collapseAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg></button>
+        <button class="collapse-btn expand-all-btn" title="全部展开项目卡片" onclick="expandAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg></button>
+      </div>
       <button class="create-btn" onclick="openCreateModal()">+ 新建项目</button>
     </div>
     <div class="sidebar-list" id="sidebarList">
@@ -406,6 +465,20 @@
         <button class="log-drawer-pin" id="logDrawerPin" title="固定（切到终端时不自动收起）" onclick="event.stopPropagation(); toggleLogDrawerPin()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.5a2.5 2.5 0 0 0-2.5-2.5h-9A2.5 2.5 0 0 0 5 15.5z"/><path d="M9 11V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v6"/><path d="M9 11h6"/></svg></button>
       </div>
       <div class="log-drawer-body" id="logConsoleBody"></div>
+    </div>
+    <!-- 文件目录浏览抽屉：右侧可折叠，贴在 console 右边缘浮动叠层。
+         根目录跟随当前激活栏项目 projectPath；展开/宽度持久化到 localStorage。
+         懒加载：点目录展开才请求 /api/projects/:id/files?sub=... -->
+    <div class="file-drawer-resizer" id="fileDrawerResizer"></div>
+    <div class="file-drawer" id="fileDrawer">
+      <div class="file-drawer-header">
+        <span class="file-drawer-title" id="fileDrawerTitle">文件</span>
+        <button class="pane-btn" id="fileDrawerRefresh" title="刷新" onclick="refreshFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        <button class="pane-btn" id="fileDrawerExplorer" title="在资源管理器中打开" onclick="openExplorerFromFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+        <button class="pane-btn" title="关闭" onclick="closeFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </div>
+      <div class="file-drawer-breadcrumb" id="fileDrawerBreadcrumb"></div>
+      <div class="file-drawer-tree" id="fileDrawerTree"></div>
     </div>
   </div>
 </div>
@@ -481,6 +554,11 @@
   <button data-act="close-right">关闭右侧所有栏</button>
   <button data-act="close-others">关闭其他栏</button>
   <button data-act="close-all">关闭全部栏</button>
+</div>
+
+<!-- 文件树右键菜单：深色样式（与文件抽屉同色系），在资源管理器中打开选中项 -->
+<div class="file-context-menu" id="fileContextMenu">
+  <button data-act="reveal">在资源管理器中打开</button>
 </div>
 
 <!-- 自绘确认框（替代原生 confirm） -->
@@ -728,6 +806,19 @@ function toggleProjectCollapsed(projectId) {
   const m = JSON.parse(localStorage.getItem('projectCollapsed') || '{}');
   if (m[projectId]) delete m[projectId]; else m[projectId] = 1;
   localStorage.setItem('projectCollapsed', JSON.stringify(m));
+  renderList();
+}
+
+// 全部折叠/全部展开项目卡片：批量写入 projectCollapsed 后重渲染。折叠=所有项目置 1，展开=清空。
+function collapseAllProjects() {
+  const m = {};
+  for (const p of projects) m[p.id] = 1;
+  localStorage.setItem('projectCollapsed', JSON.stringify(m));
+  renderList();
+}
+
+function expandAllProjects() {
+  localStorage.setItem('projectCollapsed', '{}');
   renderList();
 }
 
@@ -1165,8 +1256,11 @@ function renderPanes() {
     // 分栏按钮：仅最右侧一栏标题栏末端显示；满 4 栏禁用态由 updateSplitButton 维护
     const splitBtn = (i === panes.length - 1)
       ? `<button class="pane-btn pane-split" title="横向分栏（最多 4 栏）" onclick="event.stopPropagation(); addPane('term')">${ICON_SPLIT}</button>` : '';
+    // 文件目录浏览按钮：最右栏末端（分栏按钮后），打开右侧文件抽屉并定位到该栏项目
+    const fileBtn = (i === panes.length - 1)
+      ? `<button class="pane-btn pane-file" title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer('${p.projectId || ''}')">${ICON_FOLDER}</button>` : '';
     // 各段之间以竖线分隔：只收集存在的段，再用 divider 拼接，避免相邻段各带一条竖线导致重复
-    const tools = [closeBtn, splitBtn].filter(Boolean).join('<span class="pane-tools-divider"></span>');
+    const tools = [closeBtn, splitBtn, fileBtn].filter(Boolean).join('<span class="pane-tools-divider"></span>');
     parts.push(`<div class="pane-header" data-pane-id="${p.id}" data-pane-kind="term" onpointerdown="startPaneDrag(event,'term','${p.id}')">
         <div class="pane-tab" title="${escapeHtml(titleText)}" oncontextmenu="event.preventDefault(); showPaneContextMenu(event,'term','${p.id}')"><span class="pane-title">${titleHtml}</span></div>
         <div class="pane-tools">
@@ -1456,6 +1550,8 @@ function activatePane(kind, paneId) {
   updatePaneLogButtons();
   // 未固定时，切到终端会话栏自动收起日志抽屉，把空间还给终端
   if (!logDrawerPinned) closeLogDrawer();
+  // 文件抽屉已展开时：跟随激活栏切换根目录项目
+  syncFileDrawerProject();
 }
 
 // ---------- 拖拽 pane 标题栏排序 ----------
@@ -1634,7 +1730,7 @@ function renderList() {
     // onclick stopPropagation 阻止冒泡到卡片 selectProject，避免误触切回日志视图/重拉历史。
     const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
         <div class="term-new-row">
-          <button title="打开资源管理器" onclick="event.stopPropagation(); openExplorer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+          <button title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
           <button title="打开 cmd 命令行" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')">${CMD_LOGO}</button>
           <button title="新建 claude 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')">${CLAUDE_LOGO}</button>
           <button title="新建 codex 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')">${CODEX_LOGO}</button>
@@ -1997,12 +2093,13 @@ function closeTerm(projectId, sessionId, type) {
 }
 
 // ---------- 查看命令 ----------
-// 打开资源管理器：请求后端用 explorer.exe 打开项目目录，失败时 toast 提示
-async function openExplorer(id) {
+// 打开资源管理器：请求后端用 explorer.exe 打开项目目录（或指定子目录 sub），失败时 toast 提示
+async function openExplorer(id, sub) {
   const p = projects.find(x => x.id === id);
   if (!p) return;
   try {
-    const resp = await fetch(`/api/projects/${id}/explorer`, { method: 'POST' });
+    const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
+    const resp = await fetch(`/api/projects/${id}/explorer${q}`, { method: 'POST' });
     const data = await resp.json();
     if (!data.ok) showToast(data.msg || '打开资源管理器失败', 'error');
   } catch (e) {
@@ -2461,6 +2558,22 @@ async function loadProjects() {
   updatePaneLogButtons();
   // 项目就绪后再重连保存的会话视图：需要 projects 解析 + 服务端会话列表
   await reconnectSessionPanes();
+  // 文件抽屉：若持久化为展开态，项目就绪后绑定激活栏项目并加载根；
+  // 无激活项目也保持打开，仅显示空白占位（不弹 toast 干扰）
+  if (fileDrawerOpen) {
+    const proj = fileDrawerActiveProject();
+    if (proj) openFileDrawer();
+    else {
+      fileDrawerProjectId = null;
+      fileTreeExpanded = new Map();
+      fileTreeSelected = null;
+      applyFileDrawerState();
+      renderFileDrawerTitle();
+      const tree = document.getElementById('fileDrawerTree');
+      if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
+      renderFileBreadcrumb(null);
+    }
+  }
 }
 
 // ---------- 侧栏拖拽调宽 + 折叠 ----------
@@ -2645,9 +2758,312 @@ document.addEventListener('mousedown', (e) => {
   resizer.addEventListener('pointercancel', endDrag);
 })();
 
+// ---------- 文件目录浏览抽屉（右侧） ----------
+// 根目录跟随当前激活栏项目（activePane().projectId）。无激活项目时关闭并提示。
+// 树用扁平数据 + DOM 增量渲染：每个目录节点懒加载子层，展开态记录在 fileTreeExpanded
+//（Map: relativeSubPath -> true），刷新时按已展开集合重新请求逐层还原。
+const FILE_DRAWER_OPEN_KEY = 'fileDrawerOpen';
+const FILE_DRAWER_WIDTH_KEY = 'fileDrawerWidth';
+let fileDrawerOpen = localStorage.getItem(FILE_DRAWER_OPEN_KEY) === '1';
+let fileDrawerWidth = parseInt(localStorage.getItem(FILE_DRAWER_WIDTH_KEY), 10) || 0;
+let fileDrawerProjectId = null;     // 当前抽屉绑定的项目 id
+let fileTreeExpanded = new Map();   // sub -> true（已展开目录）
+let fileTreeSelected = null;        // 当前选中文件/目录的 sub
+const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const ICON_TWISTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
+function applyFileDrawerState() {
+  const c = document.querySelector('.console');
+  if (!c) return;
+  c.classList.toggle('file-drawer-open', fileDrawerOpen);
+  if (fileDrawerWidth > 0) c.style.setProperty('--file-drawer-w', fileDrawerWidth + 'px');
+  else c.style.removeProperty('--file-drawer-w');
+  scheduleFitAndResize();
+}
+function fileDrawerActiveProject() {
+  const act = activePane();
+  return act && act.projectId ? projects.find(x => x.id === act.projectId) : null;
+}
+function openFileDrawer(projectId) {
+  // 始终打开抽屉：优先用传入的 projectId；否则保持上次绑定的项目；再否则跟随当前激活栏项目。
+  // 三者都无（从没打开过且无激活项目）时仍打开，但树区显示空白占位。
+  const incoming = projectId ? projects.find(x => x.id === projectId) : null;
+  const proj = incoming
+    || projects.find(x => x.id === fileDrawerProjectId)
+    || fileDrawerActiveProject();
+  fileDrawerOpen = true;
+  localStorage.setItem(FILE_DRAWER_OPEN_KEY, '1');
+  // 项目变化则重置树状态，重新加载根
+  if (proj && fileDrawerProjectId !== proj.id) {
+    fileDrawerProjectId = proj.id;
+    fileTreeExpanded = new Map();
+    fileTreeSelected = null;
+  }
+  applyFileDrawerState();
+  renderFileDrawerTitle();
+  if (!proj) {
+    // 无可绑定项目：显示空白占位
+    const tree = document.getElementById('fileDrawerTree');
+    if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
+    renderFileBreadcrumb(null);
+    return;
+  }
+  if (!fileTreeExpanded.has('')) loadFileDir('');
+  else renderFileTree();
+}
+function closeFileDrawer() {
+  fileDrawerOpen = false;
+  localStorage.setItem(FILE_DRAWER_OPEN_KEY, '0');
+  applyFileDrawerState();
+}
+// 点击抽屉外任一处（终端区/侧栏/空白）自动收起文件抽屉。
+// mousedown 判定（先于 click）：打开按钮触发时抽屉尚未展开，监听器 early-return 不会误收起。
+document.addEventListener('mousedown', (e) => {
+  if (!fileDrawerOpen) return;
+  const drawer = document.getElementById('fileDrawer');
+  const resizer = document.getElementById('fileDrawerResizer');
+  if (drawer && drawer.contains(e.target)) return;     // 点在抽屉内：不收起
+  if (resizer && resizer.contains(e.target)) return;   // 点在调宽条：不收起
+  closeFileDrawer();
+});
+function toggleFileDrawer() {
+  fileDrawerOpen ? closeFileDrawer() : openFileDrawer();
+}
+function renderFileDrawerTitle() {
+  const el = document.getElementById('fileDrawerTitle');
+  if (!el) return;
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  el.textContent = proj ? `文件 · ${proj.name}` : '文件';
+  // 刷新/资源管理器按钮：无绑定项目（空白态）时禁用
+  const hasProj = !!proj;
+  const refresh = document.getElementById('fileDrawerRefresh');
+  const explorer = document.getElementById('fileDrawerExplorer');
+  if (refresh) refresh.disabled = !hasProj;
+  if (explorer) explorer.disabled = !hasProj;
+}
+// 激活栏切换时：若抽屉已展开，跟随切换根目录项目（与"失焦自动收起"日志抽屉不同，文件抽屉保持展开）
+function syncFileDrawerProject() {
+  if (!fileDrawerOpen) return;
+  const proj = fileDrawerActiveProject();
+  if (!proj) {
+    // 激活栏切到无项目：保持抽屉打开，清空树显示空白占位
+    if (fileDrawerProjectId) {
+      fileDrawerProjectId = null;
+      fileTreeExpanded = new Map();
+      fileTreeSelected = null;
+      renderFileDrawerTitle();
+      const tree = document.getElementById('fileDrawerTree');
+      if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
+      renderFileBreadcrumb(null);
+    }
+    return;
+  }
+  if (fileDrawerProjectId !== proj.id) {
+    fileDrawerProjectId = proj.id;
+    fileTreeExpanded = new Map();
+    fileTreeSelected = null;
+    renderFileDrawerTitle();
+    loadFileDir('');
+  }
+}
+// 请求某子目录一层条目，写入缓存并渲染到树。sub = '' 表示项目根。
+async function loadFileDir(sub) {
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  const tree = document.getElementById('fileDrawerTree');
+  if (!proj) { if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>'; return; }
+  // 首次加载根：占位 loading
+  if (sub === '' && tree && !tree.querySelector('.file-tree-row')) {
+    tree.innerHTML = '<div class="file-tree-loading">加载中…</div>';
+  }
+  try {
+    const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
+    const resp = await fetch(`/api/projects/${proj.id}/files${q}`);
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '读取目录失败', 'error'); return; }
+    if (!renderFileTree.cache) renderFileTree.cache = new Map();
+    renderFileTree.cache.set(sub, data.items);
+    fileTreeExpanded.set(sub, true);
+    renderFileTree();
+  } catch (e) {
+    showToast('读取目录失败: ' + e.message, 'error');
+  }
+}
+// 面包屑：根项目名 + 沿选中/展开路径的各级目录，点击跳转（折叠到该层）
+function renderFileBreadcrumb(proj) {
+  const el = document.getElementById('fileDrawerBreadcrumb');
+  if (!el) return;
+  if (!proj) { el.innerHTML = ''; return; }
+  // 路径取选中文件/目录的父链；无选中则只显示根
+  const sel = fileTreeSelected || '';
+  const segs = sel ? sel.split('/') : [];
+  // 去掉最后一段（若是文件）——面包屑只展示目录链
+  // 这里简单地按选中路径分段，逐级可点折叠到该层
+  const parts = [`<span class="crumb" onclick="fileBreadcrumbJump('')">${escapeHtml(proj.name)}</span>`];
+  let acc = '';
+  for (let i = 0; i < segs.length; i++) {
+    acc = acc ? `${acc}/${segs[i]}` : segs[i];
+    const isLast = i === segs.length - 1;
+    parts.push(`<span class="sep">/</span>`);
+    parts.push(`<span class="crumb ${isLast ? 'cur' : ''}" ${isLast ? '' : `onclick="fileBreadcrumbJump('${escapeHtml(acc)}')"`}>${escapeHtml(segs[i])}</span>`);
+  }
+  el.innerHTML = parts.join('');
+}
+function fileBreadcrumbJump(sub) {
+  // 折叠到 sub 这一层（含），移除更深层展开态
+  for (const key of [...fileTreeExpanded.keys()]) {
+    if (key !== '' && key !== sub && key.startsWith(sub + '/')) fileTreeExpanded.delete(key);
+  }
+  fileTreeSelected = sub;
+  renderFileTree();
+}
+
+// 全量重渲染树：按 fileTreeExpanded 已展开集合逐层拼 DOM。
+// 层级用 padding-left 缩进；目录行点击 toggle 展开/折叠（折叠=从 expanded 移除并重渲染）。
+function renderFileTree() {
+  const tree = document.getElementById('fileDrawerTree');
+  if (!tree) return;
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  if (!proj) { tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>'; renderFileBreadcrumb(null); return; }
+  // 已展开目录的条目缓存：sub -> items[]（避免折叠再展开时重复请求，刷新时清空）
+  if (!renderFileTree.cache) renderFileTree.cache = new Map();
+  renderFileBreadcrumb(proj);
+  // 用层级化递归渲染：从根开始，只渲染已展开的目录的子层
+  const parts = [];
+  const rootItems = renderFileTree.cache.get('');
+  if (!rootItems) { tree.innerHTML = '<div class="file-tree-loading">加载中…</div>'; return; }
+  function renderLevel(items, depth, parentSub) {
+    for (const it of items) {
+      const sub = parentSub ? `${parentSub}/${it.name}` : it.name;
+      const expanded = it.isDir && fileTreeExpanded.has(sub);
+      const selected = fileTreeSelected === sub;
+      const indent = 8 + depth * 16;
+      parts.push(`<div class="file-tree-row ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''}" style="padding-left:${indent}px" data-sub="${escapeHtml(sub)}" data-isdir="${it.isDir ? '1' : '0'}" onclick="onFileRowClick(this)" oncontextmenu="event.preventDefault(); showFileContextMenu(event, this)">`);
+      parts.push(`<span class="twisty ${it.isDir ? '' : 'empty'}">${ICON_TWISTY}</span>`);
+      parts.push(`<span class="ico ${it.isDir ? 'folder' : 'file'}">${it.isDir ? ICON_FOLDER : ICON_FILE}</span>`);
+      parts.push(`<span class="label" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</span>`);
+      parts.push(`</div>`);
+      if (expanded && it.isDir) {
+        const childItems = renderFileTree.cache.get(sub);
+        if (childItems) renderLevel(childItems, depth + 1, sub);
+      }
+    }
+  }
+  renderLevel(rootItems, 0, '');
+  tree.innerHTML = parts.length ? parts.join('') : '<div class="file-tree-empty">空目录</div>';
+}
+function onFileRowClick(row) {
+  const sub = row.dataset.sub;
+  const isDir = row.dataset.isdir === '1';
+  fileTreeSelected = sub;
+  if (!isDir) { renderFileTree(); return; }
+  // 目录：toggle 展开。展开前需确保已加载子层（缓存命中则直接渲染）
+  if (fileTreeExpanded.has(sub)) {
+    fileTreeExpanded.delete(sub);
+    renderFileTree();
+  } else {
+    // 需加载：fetch 后写缓存再渲染
+    loadFileDirIntoCache(sub);
+  }
+}
+async function loadFileDirIntoCache(sub) {
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  if (!proj) return;
+  const tree = document.getElementById('fileDrawerTree');
+  // 占位 loading 行：在选中目录行下方插一个临时行
+  try {
+    const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
+    const resp = await fetch(`/api/projects/${proj.id}/files${q}`);
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '读取目录失败', 'error'); return; }
+    if (!renderFileTree.cache) renderFileTree.cache = new Map();
+    renderFileTree.cache.set(sub, data.items);
+    fileTreeExpanded.set(sub, true);
+    renderFileTree();
+  } catch (e) {
+    showToast('读取目录失败: ' + e.message, 'error');
+  }
+}
+function refreshFileDrawer() {
+  // 清空缓存与展开态，重新加载根
+  if (renderFileTree.cache) renderFileTree.cache = new Map();
+  fileTreeExpanded = new Map();
+  fileTreeSelected = null;
+  loadFileDir('');
+}
+function openExplorerFromFileDrawer() {
+  if (fileDrawerProjectId) openExplorer(fileDrawerProjectId);
+}
+// 文件树右键菜单：右键某行定位到该条目（目录→打开该目录；文件→打开其所在目录并选中）
+function showFileContextMenu(event, row) {
+  const menu = document.getElementById('fileContextMenu');
+  menu.dataset.sub = row.dataset.sub;
+  menu.dataset.isdir = row.dataset.isdir;
+  // 菜单位置：不超出视口
+  const x = Math.min(event.clientX, window.innerWidth - 180);
+  const y = Math.min(event.clientY, window.innerHeight - 50);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+}
+function hideFileContextMenu() {
+  document.getElementById('fileContextMenu').classList.remove('show');
+}
+function execFileContextAction(act) {
+  const menu = document.getElementById('fileContextMenu');
+  const sub = menu.dataset.sub || '';
+  const isDir = menu.dataset.isdir === '1';
+  hideFileContextMenu();
+  if (act === 'reveal') {
+    if (!fileDrawerProjectId) return;
+    // 目录：打开该目录本身；文件：打开其所在父目录（文件在根则打开项目根）
+    let targetSub = sub;
+    if (!isDir) {
+      const slash = sub.lastIndexOf('/');
+      targetSub = slash >= 0 ? sub.slice(0, slash) : '';
+    }
+    openExplorer(fileDrawerProjectId, targetSub);
+  }
+}
+// 抽屉调宽拖拽：左/右拖改 --file-drawer-w（px），持久化
+(function initFileDrawerDrag() {
+  const drawer = document.getElementById('fileDrawer');
+  const resizer = document.getElementById('fileDrawerResizer');
+  if (!drawer || !resizer) return;
+  let drag = null;
+  resizer.addEventListener('pointerdown', (e) => {
+    if (!fileDrawerOpen) return;
+    e.preventDefault();
+    const w = parseFloat(getComputedStyle(drawer).width) || 280;
+    drag = { startX: e.clientX, startW: w, current: w };
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add('dragging');
+    drawer.classList.add('dragging');
+  });
+  resizer.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    // 左拖（clientX 减小）→ 抽屉变宽
+    const w = Math.max(180, Math.min(window.innerWidth - 240, drag.startW - (e.clientX - drag.startX)));
+    drag.current = w;
+    document.querySelector('.console').style.setProperty('--file-drawer-w', w + 'px');
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    fileDrawerWidth = Math.round(drag.current);
+    localStorage.setItem(FILE_DRAWER_WIDTH_KEY, String(fileDrawerWidth));
+    drag = null;
+    resizer.classList.remove('dragging');
+    drawer.classList.remove('dragging');
+    scheduleFitAndResize();
+  };
+  resizer.addEventListener('pointerup', endDrag);
+  resizer.addEventListener('pointercancel', endDrag);
+})();
+
 // 启动即应用已保存的字体设置（localStorage，默认 Cascadia Code 13px）
 applyTermSettings();
 applySidebarState();
+applyFileDrawerState(); // 应用文件抽屉折叠态/宽度（默认收起）
 // 初始分栏：优先恢复持久化的布局（栏数 + 每栏项目视图 + 激活栏），无则单栏空白。
 // 会话视图在 loadProjects 内经 reconnectSessionPanes 按服务端存活状态重连或回退空白。
 restorePaneLayout();
@@ -2673,6 +3089,21 @@ loadProjects();
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePaneContextMenu(); });
   window.addEventListener('blur', hidePaneContextMenu);
+})();
+
+// 文件树右键菜单：按钮 mousedown 即执行（早于 click，避免 explorer.exe 弹窗抢焦点
+// 导致 click 事件未完整派发、菜单不关闭）；点别处/ESC/失焦关闭
+(function () {
+  const menu = document.getElementById('fileContextMenu');
+  menu.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); execFileContextAction(b.dataset.act); });
+  });
+  document.addEventListener('click', hideFileContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('.file-context-menu') && !e.target.closest('.file-tree-row')) hideFileContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideFileContextMenu(); });
+  window.addEventListener('blur', hideFileContextMenu);
 })();
 </script>
 </body>

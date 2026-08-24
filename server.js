@@ -901,8 +901,22 @@ app.get('/api/projects/:id/command', (req, res) => {
 app.post('/api/projects/:id/explorer', (req, res) => {
   const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
-  const dir = p.projectPath;
-  if (!fs.existsSync(dir)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + dir });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  // 可选 sub：相对 projectPath 的子路径，定位到具体子目录（如右键某目录行在资源管理器打开）。
+  // 与 /files 路由同样的沙箱化：resolve 后必须仍在 base 之下。
+  const sub = req.query.sub ? String(req.query.sub) : '';
+  let dir = base;
+  if (sub) {
+    dir = path.resolve(path.join(base, sub));
+    const rel = path.relative(base, dir);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+    }
+  }
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return res.status(404).json({ ok: false, msg: '目录不存在: ' + sub });
+  }
   // 不能用 execFile 判断失败：explorer.exe 成功打开窗口时退出码也常为 1
   // （委托给已运行的 Explorer 实例），非零退出码会被 execFile 当错误上报。
   // 改用 spawn + 默认 stdio（让窗口正常打开），只监听 spawn 层 'error' 事件（ENOENT 等），
@@ -912,6 +926,49 @@ app.post('/api/projects/:id/explorer', (req, res) => {
     if (!res.headersSent) res.status(500).json({ ok: false, msg: '打开资源管理器失败: ' + (err.message || '') });
   });
   res.json({ ok: true });
+});
+
+// 文件目录浏览：列出某项目目录（或其子目录）下的一层条目，供右侧文件浏览抽屉懒加载树。
+// 参数 sub：相对 projectPath 的子路径（前端展开某目录时传入）。做 path 沙箱化：
+// resolve 后必须仍在 projectPath 之下（或等于），防止 ../ 逃逸到项目目录外。
+// 默认隐藏点号开头文件（.git 等），可传 ?all=1 显示全部。node_modules 等大目录仍列出
+// 但不递归（前端按需展开）。
+app.get('/api/projects/:id/files', (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const sub = req.query.sub ? String(req.query.sub) : '';
+  const showAll = req.query.all === '1';
+  // 拼接并规范化：join 再 resolve，确保分隔符正确；最终校验仍在 base 下
+  const target = path.resolve(path.join(base, sub));
+  const rel = path.relative(base, target);
+  // rel 以 '..' 开头或为绝对路径 => 逃逸出项目目录
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
+    return res.status(404).json({ ok: false, msg: '子目录不存在: ' + sub });
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(target, { withFileTypes: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '读取目录失败: ' + (err.message || '') });
+  }
+  const items = entries
+    .filter((e) => showAll || !e.name.startsWith('.'))
+    .map((e) => {
+      // Dirent 无 size 属性，文件条目需 stat 取大小；目录不附带（懒加载子层）
+      let size = null;
+      if (e.isFile()) {
+        try { size = fs.statSync(path.join(target, e.name)).size; } catch (_) {}
+      }
+      return { name: e.name, isDir: e.isDirectory(), size };
+    })
+    // 目录优先、再按名称排序（Windows 资源管理器习惯）
+    .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+  res.json({ ok: true, path: sub || '', items });
 });
 
 // 日志历史：start.log 是全量历史（appendLog 同时写文件和内存缓冲），

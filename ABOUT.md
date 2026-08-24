@@ -1,12 +1,32 @@
 # PolyTaskPanel
 
-**版本**：1.4.1
+**版本**：1.5.0
 
-多元任务面板：可运行 SpringBoot / Node 项目，创建Claude Code / Codex会话。
+多元任务面板：Web 界面管理 SpringBoot / Node 项目，一键启停、实时日志、进程树清理，并内置 Claude Code / Codex / pi 交互式终端。
 
 ---
 
 ## 功能
 
-- 可运行 SpringBoot / Node 项目
-- 内置终端：claude / codex 会话
+- **项目管理**：SpringBoot / Node / Folder 三类，新增 / 编辑 / 删除 / 拖拽排序，持久化到 `projects.json`。
+- **一键启停**：启动 / 停止 / 重启；停止时递归 `taskkill /T` 杀进程树，不留孤儿进程占端口。
+- **实时日志**：宿主项目日志 ANSI→HTML 渲染，可清空。
+- **内置终端**：真 PTY（node-pty）+ xterm.js，在项目目录开交互式终端——Claude Code / Codex / pi / cmd，TUI 完整可用。
+- **文件目录浏览**：右侧抽屉浏览项目目录树，可折叠 / 拖拽调宽；支持在资源管理器中打开目录。
+- **多栏分屏**：主区 1~4 栏并列，可同时查看多个会话 / 日志。
+- **侧栏折叠**：宽度可拖拽调整，可折叠为图标列。
+- **全部折叠 / 全部展开**：侧栏顶部一键折叠 / 展开所有项目卡片。
+
+---
+
+## 1.5.0 更新
+
+- 侧栏顶部新增「全部折叠」「全部展开」项目卡片按钮（图标参考 IDA，上下两个尖括号向内 / 向外）。
+
+---
+
+## 桌面壳
+
+可选 Tauri 打包为原生 Windows 应用（NSIS 安装包），自带 WebView2 窗口；打包时捆绑固定版本 Node 以匹配 node-pty 的 ABI。
+
+MIT License
