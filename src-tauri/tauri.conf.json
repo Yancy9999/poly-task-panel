@@ -32,6 +32,11 @@
       "bundled-node": "bundled-node"
     },
     "windows": {
+      "allowDowngrades": true,
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["zh-CN"]
+      },
       "wix": {
         "language": ["zh-CN"]
       }

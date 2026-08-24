@@ -237,6 +237,20 @@ npm test
 
 ---
 
+## pi 粘贴优化扩展（.pi/extensions/）
+
+在部分终端（Git Bash/mintty、cmd/PowerShell conhost 等）里用 pi 时，粘贴多行提示词会在第一个换行处直接触发发送。原因：这些终端不启用 bracketed paste，粘贴的每个 `\r` 被 stdin 当作一次 Enter（submit）。
+
+本仓库的 `.pi/extensions/paste-safe-editor.ts` 是一个 pi 项目级扩展，用时间窗口启发式区分「粘贴中的换行」与「手动 Enter」：
+
+- 紧跟快速输入（<10ms）到达的换行 → 插入换行符，不提交；
+- 孤立的 Enter → 挂起 30ms，期间无新输入才真正提交。
+
+- 生效方式：在 pi 里运行 `/reload`（或重启 pi）；无需改动 pi 源码。
+- 判定逻辑（`.pi/extensions/lib/paste-guard.mts`）有独立单元测试：`node --test test/paste-guard.test.mts`。
+
+---
+
 ## 许可
 
 MIT License（详见 LICENSE 文件，如未随附则按 MIT 条款使用）。
