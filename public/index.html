@@ -1006,21 +1006,21 @@ function closeCmdPop() {
 }
 
 // 发送命令到终端会话并自动提交（回车）。
-// 按「命令 + 空格 + 回车」分 3 次写入：先写命令文本，再写一个空格，最后写回车。
+// 按「命令 + Tab + 回车」分 3 次写入：先写命令文本，再写一个 Tab，最后写回车。
 // 每次之间留间隔，避免 codex bracketed-paste 把整串一次性判定为粘贴（粘贴时命令不被识别、回车变字面换行）。
 // 三类会话（claude / codex / cmd）统一走此路径。
-const CMD_PART_INTERVAL = 100;  // 命令/空格/回车 三段写入间隔（ms）
+const CMD_PART_INTERVAL = 50;  // 命令/Tab/回车 三段写入间隔（ms）
 function sendTermCommand(sessionId, cmd) {
   const s = termSessions.get(sessionId);
   if (!s || !s.send) return;
   try { s.term.focus(); } catch (e) {}
-  // 分 3 次写入：命令 -> 空格 -> 回车。会话中途若被关闭则跳过（每次重新 get 校验存活）。
+  // 分 3 次写入：命令 -> Tab -> 回车。会话中途若被关闭则跳过（每次重新 get 校验存活）。
   const send = (data) => {
     const cur = termSessions.get(sessionId);
     if (cur && cur.send) cur.send(data);
   };
   send(cmd);
-  setTimeout(() => send(' '), CMD_PART_INTERVAL);
+  setTimeout(() => send('\t'), CMD_PART_INTERVAL);
   setTimeout(() => send('\r'), CMD_PART_INTERVAL * 2);
 }
 
