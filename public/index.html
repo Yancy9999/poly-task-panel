@@ -467,8 +467,8 @@
       <div class="log-drawer-body" id="logConsoleBody"></div>
     </div>
     <!-- 文件目录浏览抽屉：右侧可折叠，贴在 console 右边缘浮动叠层。
-         根目录跟随当前激活栏项目 projectPath；展开/宽度持久化到 localStorage。
-         懒加载：点目录展开才请求 /api/projects/:id/files?sub=... -->
+         项目/展开层级/选中态持久化，与分栏窗口解耦；唯一切换项目入口是侧栏卡片文件夹按钮。
+         懒加载：点目录展开才请求 /api/projects/:id/files?sub=... ——>
     <div class="file-drawer-resizer" id="fileDrawerResizer"></div>
     <div class="file-drawer" id="fileDrawer">
       <div class="file-drawer-header">
@@ -1256,9 +1256,10 @@ function renderPanes() {
     // 分栏按钮：仅最右侧一栏标题栏末端显示；满 4 栏禁用态由 updateSplitButton 维护
     const splitBtn = (i === panes.length - 1)
       ? `<button class="pane-btn pane-split" title="横向分栏（最多 4 栏）" onclick="event.stopPropagation(); addPane('term')">${ICON_SPLIT}</button>` : '';
-    // 文件目录浏览按钮：最右栏末端（分栏按钮后），打开右侧文件抽屉并定位到该栏项目
+    // 文件目录浏览按钮：最右栏末端（分栏按钮后），纯粹打开文件抽屉（不绑定本栏项目，
+    // 恢复上次打开的项目目录 + 展开层级 + 选中态）
     const fileBtn = (i === panes.length - 1)
-      ? `<button class="pane-btn pane-file" title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer('${p.projectId || ''}')">${ICON_FOLDER}</button>` : '';
+      ? `<button class="pane-btn pane-file" title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer()">${ICON_FOLDER}</button>` : '';
     // 各段之间以竖线分隔：只收集存在的段，再用 divider 拼接，避免相邻段各带一条竖线导致重复
     const tools = [closeBtn, splitBtn, fileBtn].filter(Boolean).join('<span class="pane-tools-divider"></span>');
     parts.push(`<div class="pane-header" data-pane-id="${p.id}" data-pane-kind="term" onpointerdown="startPaneDrag(event,'term','${p.id}')">
@@ -1550,8 +1551,6 @@ function activatePane(kind, paneId) {
   updatePaneLogButtons();
   // 未固定时，切到终端会话栏自动收起日志抽屉，把空间还给终端
   if (!logDrawerPinned) closeLogDrawer();
-  // 文件抽屉已展开时：跟随激活栏切换根目录项目
-  syncFileDrawerProject();
 }
 
 // ---------- 拖拽 pane 标题栏排序 ----------
@@ -1730,7 +1729,7 @@ function renderList() {
     // onclick stopPropagation 阻止冒泡到卡片 selectProject，避免误触切回日志视图/重拉历史。
     const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
         <div class="term-new-row">
-          <button title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+          <button title="文件目录浏览（切换到该项目目录）" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
           <button title="打开 cmd 命令行" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')">${CMD_LOGO}</button>
           <button title="新建 claude 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')">${CLAUDE_LOGO}</button>
           <button title="新建 codex 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')">${CODEX_LOGO}</button>
@@ -2395,6 +2394,17 @@ async function deleteProject(id) {
   // 若终端激活栏因此空白，重置 currentId（标题栏随栏渲染，无需单独同步）
   const act = activePane();
   if (!act || !act.projectId) { currentId = null; }
+  // 文件抽屉正绑定该项目：清理持久化状态，回退空白占位
+  if (fileDrawerProjectId === id) {
+    fileDrawerProjectId = null;
+    fileTreeExpanded = new Map();
+    fileTreeSelected = null;
+    persistFileDrawerState();
+    renderFileDrawerTitle();
+    const tree = document.getElementById('fileDrawerTree');
+    if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
+    renderFileBreadcrumb(null);
+  }
 }
 
 // ---------- 自绘提示（替代原生 alert/confirm） ----------
@@ -2558,22 +2568,9 @@ async function loadProjects() {
   updatePaneLogButtons();
   // 项目就绪后再重连保存的会话视图：需要 projects 解析 + 服务端会话列表
   await reconnectSessionPanes();
-  // 文件抽屉：若持久化为展开态，项目就绪后绑定激活栏项目并加载根；
-  // 无激活项目也保持打开，仅显示空白占位（不弹 toast 干扰）
-  if (fileDrawerOpen) {
-    const proj = fileDrawerActiveProject();
-    if (proj) openFileDrawer();
-    else {
-      fileDrawerProjectId = null;
-      fileTreeExpanded = new Map();
-      fileTreeSelected = null;
-      applyFileDrawerState();
-      renderFileDrawerTitle();
-      const tree = document.getElementById('fileDrawerTree');
-      if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
-      renderFileBreadcrumb(null);
-    }
-  }
+  // 文件抽屉：若持久化为展开态，恢复上次打开的项目 + 展开层级 + 选中态（与分栏解耦，不绑定激活栏）；
+  // 无历史状态则保持打开但显示空白占位（不弹 toast 干扰）
+  if (fileDrawerOpen) openFileDrawer();
 }
 
 // ---------- 侧栏拖拽调宽 + 折叠 ----------
@@ -2759,16 +2756,38 @@ document.addEventListener('mousedown', (e) => {
 })();
 
 // ---------- 文件目录浏览抽屉（右侧） ----------
-// 根目录跟随当前激活栏项目（activePane().projectId）。无激活项目时关闭并提示。
+// 与分栏窗口完全解耦：项目/展开层级/选中态均持久化，右上角按钮纯粹恢复上次状态，
+// 唯一切换项目目录的入口是侧栏项目卡片的文件夹按钮（openFileDrawer(projectId)）。
 // 树用扁平数据 + DOM 增量渲染：每个目录节点懒加载子层，展开态记录在 fileTreeExpanded
-//（Map: relativeSubPath -> true），刷新时按已展开集合重新请求逐层还原。
+//（Map: relativeSubPath -> true），重新打开时按已展开集合重新请求逐层还原。
 const FILE_DRAWER_OPEN_KEY = 'fileDrawerOpen';
 const FILE_DRAWER_WIDTH_KEY = 'fileDrawerWidth';
+// 抽屉完整状态持久化：项目 + 展开层级 + 选中态，与分栏窗口完全解耦。
+// 右上角按钮纯粹恢复上次状态；唯一切换项目目录的入口是侧栏项目卡片的文件夹按钮（openFileDrawer(projectId)）。
+const FILE_DRAWER_PROJECT_KEY = 'fileDrawerProject';
+const FILE_DRAWER_EXPANDED_KEY = 'fileDrawerExpanded';
+const FILE_DRAWER_SELECTED_KEY = 'fileDrawerSelected';
 let fileDrawerOpen = localStorage.getItem(FILE_DRAWER_OPEN_KEY) === '1';
 let fileDrawerWidth = parseInt(localStorage.getItem(FILE_DRAWER_WIDTH_KEY), 10) || 0;
 let fileDrawerProjectId = null;     // 当前抽屉绑定的项目 id
 let fileTreeExpanded = new Map();   // sub -> true（已展开目录）
 let fileTreeSelected = null;        // 当前选中文件/目录的 sub
+// 启动时从 localStorage 还原上次的项目/展开/选中状态（openFileDrawer 时才真正加载树）
+(function restoreFileDrawerState() {
+  fileDrawerProjectId = localStorage.getItem(FILE_DRAWER_PROJECT_KEY) || null;
+  try {
+    const arr = JSON.parse(localStorage.getItem(FILE_DRAWER_EXPANDED_KEY) || '[]');
+    if (Array.isArray(arr)) fileTreeExpanded = new Map(arr.map(s => [s, true]));
+  } catch (e) { /* 损坏则从空白开始 */ }
+  fileTreeSelected = localStorage.getItem(FILE_DRAWER_SELECTED_KEY) || null;
+})();
+function persistFileDrawerState() {
+  if (fileDrawerProjectId) localStorage.setItem(FILE_DRAWER_PROJECT_KEY, fileDrawerProjectId);
+  else localStorage.removeItem(FILE_DRAWER_PROJECT_KEY);
+  localStorage.setItem(FILE_DRAWER_EXPANDED_KEY, JSON.stringify([...fileTreeExpanded.keys()]));
+  if (fileTreeSelected) localStorage.setItem(FILE_DRAWER_SELECTED_KEY, fileTreeSelected);
+  else localStorage.removeItem(FILE_DRAWER_SELECTED_KEY);
+}
 const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
 const ICON_FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 const ICON_TWISTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
@@ -2781,40 +2800,52 @@ function applyFileDrawerState() {
   else c.style.removeProperty('--file-drawer-w');
   scheduleFitAndResize();
 }
-function fileDrawerActiveProject() {
-  const act = activePane();
-  return act && act.projectId ? projects.find(x => x.id === act.projectId) : null;
-}
 function openFileDrawer(projectId) {
-  // 始终打开抽屉：优先用传入的 projectId；否则保持上次绑定的项目；再否则跟随当前激活栏项目。
-  // 三者都无（从没打开过且无激活项目）时仍打开，但树区显示空白占位。
-  const incoming = projectId ? projects.find(x => x.id === projectId) : null;
-  const proj = incoming
-    || projects.find(x => x.id === fileDrawerProjectId)
-    || fileDrawerActiveProject();
+  // 无参调用（右上角按钮）：纯粹打开抽屉，恢复上次持久化的项目 + 展开层级 + 选中态；
+  // 从未打开过（无持久化状态）时显示空白占位。
+  // 带参调用（侧栏项目卡片文件夹按钮，唯一切换项目目录的入口）：重置树并加载该项目根。
+  if (projectId) {
+    const incoming = projects.find(x => x.id === projectId);
+    if (incoming && fileDrawerProjectId !== incoming.id) {
+      fileDrawerProjectId = incoming.id;
+      fileTreeExpanded = new Map();
+      fileTreeSelected = null;
+    }
+  }
   fileDrawerOpen = true;
   localStorage.setItem(FILE_DRAWER_OPEN_KEY, '1');
-  // 项目变化则重置树状态，重新加载根
-  if (proj && fileDrawerProjectId !== proj.id) {
-    fileDrawerProjectId = proj.id;
-    fileTreeExpanded = new Map();
-    fileTreeSelected = null;
-  }
   applyFileDrawerState();
   renderFileDrawerTitle();
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
   if (!proj) {
-    // 无可绑定项目：显示空白占位
+    // 无可绑定项目（从没打开过/历史项目已删）：显示空白占位
+    fileDrawerProjectId = null;
+    fileTreeExpanded = new Map();
+    fileTreeSelected = null;
+    persistFileDrawerState();
     const tree = document.getElementById('fileDrawerTree');
     if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
     renderFileBreadcrumb(null);
     return;
   }
-  if (!fileTreeExpanded.has('')) loadFileDir('');
-  else renderFileTree();
+  // 还原展开层级：请求展开集合里缓存未命中的层（含根 ''，页面刷新后缓存为空时必须补拉根），
+  // 命中缓存直接渲染
+  if (!fileTreeExpanded.has('') ) { loadFileDir(''); return; }
+  const cache = fileTreeCache();
+  const missing = [...fileTreeExpanded.keys()].filter(sub => !(cache && cache.has(sub)));
+  if (missing.length) {
+    // 逐层补拉缺失的展开层（静默模式，失效路径自动从展开集合移除），全部完成后渲染
+    Promise.all(missing.map(sub => loadFileDir(sub, true)))
+      .then(() => { if (fileDrawerOpen) renderFileTree(); });
+    renderFileTree(); // 先用已有缓存渲染（根缺失时显示加载中占位），避免闪空白
+  } else {
+    renderFileTree();
+  }
 }
 function closeFileDrawer() {
   fileDrawerOpen = false;
   localStorage.setItem(FILE_DRAWER_OPEN_KEY, '0');
+  persistFileDrawerState();
   applyFileDrawerState();
 }
 // 点击抽屉外任一处（终端区/侧栏/空白）自动收起文件抽屉。
@@ -2842,33 +2873,11 @@ function renderFileDrawerTitle() {
   if (refresh) refresh.disabled = !hasProj;
   if (explorer) explorer.disabled = !hasProj;
 }
-// 激活栏切换时：若抽屉已展开，跟随切换根目录项目（与"失焦自动收起"日志抽屉不同，文件抽屉保持展开）
-function syncFileDrawerProject() {
-  if (!fileDrawerOpen) return;
-  const proj = fileDrawerActiveProject();
-  if (!proj) {
-    // 激活栏切到无项目：保持抽屉打开，清空树显示空白占位
-    if (fileDrawerProjectId) {
-      fileDrawerProjectId = null;
-      fileTreeExpanded = new Map();
-      fileTreeSelected = null;
-      renderFileDrawerTitle();
-      const tree = document.getElementById('fileDrawerTree');
-      if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>';
-      renderFileBreadcrumb(null);
-    }
-    return;
-  }
-  if (fileDrawerProjectId !== proj.id) {
-    fileDrawerProjectId = proj.id;
-    fileTreeExpanded = new Map();
-    fileTreeSelected = null;
-    renderFileDrawerTitle();
-    loadFileDir('');
-  }
-}
-// 请求某子目录一层条目，写入缓存并渲染到树。sub = '' 表示项目根。
-async function loadFileDir(sub) {
+// 激活栏切换不再联动文件抽屉：抽屉与分栏窗口完全解耦，保持上次打开的项目目录不变。
+
+// 请求某子目录一层条目。toCache=true 时只写缓存不渲染（用于还原展开态时批量补拉），
+// sub = '' 表示项目根。
+async function loadFileDir(sub, toCache) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   const tree = document.getElementById('fileDrawerTree');
   if (!proj) { if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>'; return; }
@@ -2880,15 +2889,23 @@ async function loadFileDir(sub) {
     const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
     const resp = await fetch(`/api/projects/${proj.id}/files${q}`);
     const data = await resp.json();
-    if (!data.ok) { showToast(data.msg || '读取目录失败', 'error'); return; }
+    if (!data.ok) {
+      // 还原路径（toCache）失败：目录可能已被删除/改名，静默从展开集合移除并持久化，
+      // 避免每次打开抽屉都对该残留路径重复报错
+      if (toCache) { fileTreeExpanded.delete(sub); persistFileDrawerState(); return; }
+      showToast(data.msg || '读取目录失败', 'error'); return;
+    }
     if (!renderFileTree.cache) renderFileTree.cache = new Map();
     renderFileTree.cache.set(sub, data.items);
     fileTreeExpanded.set(sub, true);
-    renderFileTree();
+    persistFileDrawerState();
+    if (!toCache) renderFileTree();
   } catch (e) {
+    if (toCache) { fileTreeExpanded.delete(sub); persistFileDrawerState(); return; }
     showToast('读取目录失败: ' + e.message, 'error');
   }
 }
+function fileTreeCache() { return renderFileTree.cache || null; }
 // 面包屑：根项目名 + 沿选中/展开路径的各级目录，点击跳转（折叠到该层）
 function renderFileBreadcrumb(proj) {
   const el = document.getElementById('fileDrawerBreadcrumb');
@@ -2915,6 +2932,7 @@ function fileBreadcrumbJump(sub) {
     if (key !== '' && key !== sub && key.startsWith(sub + '/')) fileTreeExpanded.delete(key);
   }
   fileTreeSelected = sub;
+  persistFileDrawerState();
   renderFileTree();
 }
 
@@ -2956,19 +2974,21 @@ function onFileRowClick(row) {
   const sub = row.dataset.sub;
   const isDir = row.dataset.isdir === '1';
   fileTreeSelected = sub;
-  if (!isDir) { renderFileTree(); return; }
+  if (!isDir) { persistFileDrawerState(); renderFileTree(); return; }
   // 目录：toggle 展开。展开前需确保已加载子层（缓存命中则直接渲染）
   if (fileTreeExpanded.has(sub)) {
     fileTreeExpanded.delete(sub);
+    persistFileDrawerState();
     renderFileTree();
   } else {
     // 需加载：fetch 后写缓存再渲染
     loadFileDirIntoCache(sub);
   }
 }
-async function loadFileDirIntoCache(sub) {
+async function loadFileDirIntoCache(sub, silent) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   if (!proj) return;
+  if (silent) { await loadFileDir(sub, true); return; }
   const tree = document.getElementById('fileDrawerTree');
   // 占位 loading 行：在选中目录行下方插一个临时行
   try {
@@ -2979,6 +2999,7 @@ async function loadFileDirIntoCache(sub) {
     if (!renderFileTree.cache) renderFileTree.cache = new Map();
     renderFileTree.cache.set(sub, data.items);
     fileTreeExpanded.set(sub, true);
+    persistFileDrawerState();
     renderFileTree();
   } catch (e) {
     showToast('读取目录失败: ' + e.message, 'error');
@@ -2989,6 +3010,7 @@ function refreshFileDrawer() {
   if (renderFileTree.cache) renderFileTree.cache = new Map();
   fileTreeExpanded = new Map();
   fileTreeSelected = null;
+  persistFileDrawerState();
   loadFileDir('');
 }
 function openExplorerFromFileDrawer() {

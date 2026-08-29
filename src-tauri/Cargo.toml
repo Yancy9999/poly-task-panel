@@ -1,6 +1,6 @@
 [package]
 name = "poly-task-panel"
-version = "1.5.1"
+version = "1.5.2"
 description = "Windows 多元任务面板 - WebView 壳"
 edition = "2021"
 
