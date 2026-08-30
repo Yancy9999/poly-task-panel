@@ -993,6 +993,288 @@ app.post('/api/projects/:id/clear-logs', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Git 集成 REST API：/api/projects/:id/git/{status,stage,commit,push,pull,branches,checkout,log,diff}
+// 统一 execFile('git', ...) 不走 shell（防注入）；文件路径参数做与 /files 相同的
+// resolve 沙箱化。非 git 仓库统一返回 { ok:false, notRepo:true }，前端据此显示占位。
+// push/pull 涉及网络与远端凭证：命令行已配好凭证即可直接推拉，失败原样返回 git
+// 输出，不做凭证管理。
+// ---------------------------------------------------------------------------
+const GIT_TIMEOUT_MS = 60 * 1000; // push/pull 等网络操作超时
+const GIT_LOG_LIMIT_MAX = 200;
+
+// 执行 git 子命令。opts.sandboxRel 可传相对 projectPath 的路径用于沙箱校验
+// （diff 单文件用：只校验不切换 cwd——git 的 pathspec 相对 cwd 解析，
+// 换了 cwd 传参就得相应改写，直接在项目根跑最简单），逃逸则返回 { sandbox:true }。
+function runGit(project, args, opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    if (o.sandboxRel !== undefined && o.sandboxRel !== '') {
+      const target = path.resolve(path.join(project.projectPath, o.sandboxRel));
+      const rel = path.relative(project.projectPath, target);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        resolve({ ok: false, sandbox: true, msg: '路径超出项目目录' });
+        return;
+      }
+    }
+    const cwd = project.projectPath;
+    // -c core.quotepath=false：非 ASCII 文件名不转义成 \xxx 八进制，直接输出 UTF-8
+    const fullArgs = ['-c', 'core.quotepath=false', ...args];
+    execFile('git', fullArgs, {
+      cwd,
+      windowsHide: true,
+      timeout: o.timeout || GIT_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        // git 在非仓库目录执行报 "not a git repository"（exit code 128）
+        const isNotRepo = err.code === 128 && /not a git repository/i.test((stderr || '') + (stdout || ''));
+        resolve({
+          ok: false,
+          notRepo: isNotRepo || undefined,
+          code: err.code,
+          msg: (stderr || stdout || err.message || '').trim(),
+        });
+        return;
+      }
+      resolve({ ok: true, stdout: stdout || '', stderr: stderr || '' });
+    });
+  });
+}
+
+function getGitProject(req, res) {
+  const p = getProject(req.params.id);
+  if (!p) { res.status(404).json({ ok: false, msg: '项目不存在' }); return null; }
+  if (!fs.existsSync(p.projectPath)) {
+    res.status(404).json({ ok: false, msg: '目录不存在: ' + p.projectPath });
+    return null;
+  }
+  return p;
+}
+
+// 解析 porcelain=v1 -b 输出：
+// 首行 ## 分支信息（如 "## main...origin/main [ahead 1, behind 2]"），其余行 XY<space>路径。
+// 重命名行形如 "R  old -> new"，取 -> 后的新路径。
+// ahead/behind 从分支行的 [ahead N, behind M] 段解析（无 upstream 或已同步时为 null）。
+function parseGitStatusPorcelain(stdout) {
+  const lines = stdout.split(/\r?\n/);
+  let branch = null;
+  let ahead = null;
+  let behind = null;
+  const files = [];
+  for (const line of lines) {
+    if (!line) continue;
+    if (line.startsWith('## ')) {
+      const head = line.slice(3);
+      const m = head.match(/^([^.\s]+)/);
+      branch = m ? m[1] : null;
+      const aheadM = head.match(/\bahead (\d+)/);
+      const behindM = head.match(/\bbehind (\d+)/);
+      if (aheadM) ahead = parseInt(aheadM[1], 10);
+      if (behindM) behind = parseInt(behindM[1], 10);
+      continue;
+    }
+    const x = line[0]; // staged 状态
+    const y = line[1]; // unstaged 状态
+    let file = line.slice(3);
+    const arrow = file.indexOf(' -> ');
+    if (arrow >= 0) file = file.slice(arrow + 4);
+    files.push({ x, y, file });
+  }
+  return { branch, files, ahead, behind };
+}
+
+app.get('/api/projects/:id/git/status', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const r = await runGit(p, ['status', '--porcelain=v1', '-b', '--untracked-files=all']);
+  if (!r.ok) {
+    return res.json(r.notRepo
+      ? { ok: false, notRepo: true }
+      : { ok: false, msg: r.msg || 'git status 失败' });
+  }
+  const { branch, files, ahead, behind } = parseGitStatusPorcelain(r.stdout);
+  res.json({ ok: true, branch, files, ahead, behind });
+});
+
+// stage/unstage：body { files: string[], unstage?: bool }
+app.post('/api/projects/:id/git/stage', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
+  if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  const r = await runGit(p, (req.body.unstage ? ['reset', 'HEAD', '--'] : ['add', '--']).concat(files));
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'git 操作失败' });
+  }
+  res.json({ ok: true });
+});
+
+// commit：body { message }。git commit -m 不经 shell，无注入风险。
+app.post('/api/projects/:id/git/commit', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const message = String((req.body && req.body.message) || '').trim();
+  if (!message) return res.status(400).json({ ok: false, msg: '提交说明不能为空' });
+  const r = await runGit(p, ['commit', '-m', message]);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '提交失败' });
+  }
+  res.json({ ok: true, msg: r.stdout.trim() });
+});
+
+// push / pull：返回合并输出，供前端 toast 展示
+function registerGitNetworkRoute(routePath, gitArgs, label) {
+  app.post(`/api/projects/:id/git/${routePath}`, async (req, res) => {
+    const p = getGitProject(req, res);
+    if (!p) return;
+    const r = await runGit(p, gitArgs);
+    if (!r.ok) {
+      return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || `${label}失败` });
+    }
+    res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
+  });
+}
+registerGitNetworkRoute('push', ['push'], 'push');
+registerGitNetworkRoute('pull', ['pull'], 'pull');
+// fetch：只更新远端跟踪指针（origin/main 等），不动工作区——
+// 供前端打开抽屉/点刷新时刷新 ahead/behind 徽标，安全无副作用
+registerGitNetworkRoute('fetch', ['fetch', '--prune'], 'fetch');
+
+// 撤回最新一条提交（软撤回）：git reset --soft HEAD~1，改动回到已暂存区，文件内容不丢。
+// 安全约束：仅当 HEAD 未推送（upstream 是 HEAD~1 或更早的祖先）时允许——已推送的提交
+// 撤回会造成本地/远端分叉，需要 force push，不在本功能范围内。
+app.post('/api/projects/:id/git/undo-commit', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  // 前置：有 upstream 才谈得上"未推送"
+  const up = await runGit(p, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  if (!up.ok || !up.stdout.trim()) {
+    return res.json({ ok: false, msg: '分支没有上游（upstream），无法判断是否已推送，拒绝撤回' });
+  }
+  // upstream 必须是 HEAD~1 的祖先：HEAD 未推送且是最新提交。
+  // （upstream==HEAD~1 时 ahead=1；更早时 ahead>1，同样只撤最新一条。）
+  const anc = await runGit(p, ['merge-base', '--is-ancestor', '@{upstream}', 'HEAD~1']);
+  if (!anc.ok) {
+    return res.json({ ok: false, msg: '最新提交已推送到远端（或无更早提交），不能撤回' });
+  }
+  const r = await runGit(p, ['reset', '--soft', 'HEAD~1']);
+  if (!r.ok) {
+    return res.json({ ok: false, msg: r.msg || '撤回失败' });
+  }
+  res.json({ ok: true, msg: '已撤回最新提交，改动回到已暂存区' });
+});
+
+// 分支列表：--format 直接给 JSON 友好的字段（%(refname:short)\t%(HEAD)），避免解析 * 前缀的本地化歧义
+app.get('/api/projects/:id/git/branches', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const r = await runGit(p, ['branch', '--format=%(refname:short)%09%(HEAD)']);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '获取分支失败' });
+  }
+  const branches = [];
+  let current = null;
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (!line) continue;
+    const tab = line.lastIndexOf('\t');
+    const name = line.slice(0, tab);
+    const isHead = line.slice(tab + 1) === '*';
+    branches.push(name);
+    if (isHead) current = name;
+  }
+  res.json({ ok: true, branches, current });
+});
+
+// 切换分支：body { branch }
+app.post('/api/projects/:id/git/checkout', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const branch = String((req.body && req.body.branch) || '').trim();
+  if (!branch) return res.status(400).json({ ok: false, msg: '未指定分支' });
+  const r = await runGit(p, ['checkout', branch]);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '切换分支失败' });
+  }
+  res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
+});
+
+// 提交历史：--pretty 用 %x1f（单元分隔符）/ %x1e（记录分隔符）拼字段，按分隔符切，
+// 避免作者名或 message 里出现 | 或换行导致解析错位。
+// --name-only 附带每次提交的变更文件列表（前端历史条目展开用），记录分隔符 %x1e 在
+// 文件列表之后输出，切分时每条记录 = 元数据行 + 文件行们。
+// 每条提交附带 pushed 标记：当前分支有 upstream 时用 rev-list <upstream>..HEAD
+// 取未推送提交集合，命中的 pushed=false，其余 true；无 upstream 时全部 false。
+app.get('/api/projects/:id/git/log', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  let limit = parseInt(req.query.limit, 10);
+  if (!(limit > 0)) limit = 30;
+  if (limit > GIT_LOG_LIMIT_MAX) limit = GIT_LOG_LIMIT_MAX;
+  const r = await runGit(p, ['log', `--max-count=${limit}`, '--name-only',
+    '--pretty=format:%x1e%h%x1f%an%x1f%at%x1f%s']);
+  if (!r.ok) {
+    if (r.notRepo) return res.json({ ok: false, notRepo: true });
+    // 空仓库（无任何提交）git log 退出码 128：提示"does not have any commits"
+    if (/does not have any commits yet/i.test(r.msg || '')) return res.json({ ok: true, commits: [] });
+    return res.json({ ok: false, msg: r.msg || 'git log 失败' });
+  }
+  // 记录以 %x1e 开头：每条记录 = 元数据行 + 本条提交的文件列表（--name-only）。
+  // 这样文件列表归属于自己的记录，不会混进下一条。
+  const commits = [];
+  for (const rec of r.stdout.split('\x1e')) {
+    const t = rec.replace(/^\r?\n/, '');
+    if (!t.trim()) continue;
+    const lines = t.split(/\r?\n/);
+    const [hash, author, at, subject] = (lines.shift() || '').split('\x1f');
+    // 元数据行之后全部是 --name-only 的文件列表（过滤空行）
+    const files = lines.map(s => s.trim()).filter(Boolean);
+    commits.push({ hash, author, at: parseInt(at, 10) || 0, subject, files });
+  }
+  // pushed 标记：upstream 分支名取自 branch@{upstream}（rev-parse 解析，失败即无 upstream）
+  const up = await runGit(p, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  if (up.ok && up.stdout.trim()) {
+    const un = await runGit(p, ['rev-list', up.stdout.trim() + '..HEAD']);
+    const unpushed = new Set(un.ok ? un.stdout.split(/\r?\n/).filter(Boolean) : []);
+    for (const c of commits) {
+      // rev-list 输出全 hash，log 的 %h 是短 hash：按前缀匹配（短串必为全 hash 前缀）
+      c.pushed = ![...unpushed].some(h => c.hash === h || h.startsWith(c.hash));
+    }
+  } else {
+    for (const c of commits) c.pushed = false;
+  }
+  res.json({ ok: true, commits });
+});
+
+// diff：query file（相对 projectPath 的文件路径，沙箱化）、cached=1（已暂存）、
+// commit=<hash>（看某次提交的变更，忽略 file）。file 与 cached 均未传时为工作区整体 diff。
+app.get('/api/projects/:id/git/diff', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const file = req.query.file ? String(req.query.file) : '';
+  const cached = req.query.cached === '1';
+  const commit = req.query.commit ? String(req.query.commit) : '';
+  if (commit && !/^[0-9a-fA-F]{4,40}$/.test(commit)) {
+    return res.status(400).json({ ok: false, msg: '非法的 commit hash' });
+  }
+  const args = ['diff', '--no-color'];
+  if (commit) {
+    // 看某次提交自身的变更：diff 其父提交（<hash>^）与该提交，而非 diff 到工作区。
+    // 可与 file 组合：只看该提交中单个文件的 diff（历史条目展开点文件用）
+    args.push(`${commit}^`, commit);
+    if (file) args.push('--', file);
+  } else {
+    if (cached) args.push('--cached');
+    if (file) args.push('--', file);
+  }
+  const r = await runGit(p, args, file ? { sandboxRel: path.dirname(file) } : undefined);
+  if (!r.ok) {
+    if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'git diff 失败' });
+  }
+  res.json({ ok: true, diff: r.stdout });
+});
+
+// ---------------------------------------------------------------------------
 // 终端会话 REST API(claude / codex;会话仅运行时内存,不落盘)
 // 两类型路由平行:/api/projects/:id/claude-sessions 与 .../codex-sessions,
 // 同一套 handler 按类型参数化注册;sessionId 前缀已含类型,其余逻辑共用。

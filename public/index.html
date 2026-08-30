@@ -13,127 +13,119 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2329; height: 100vh; display: flex; flex-direction: column; }
-  .main { flex: 1; display: flex; overflow: hidden; min-height: 0; padding: 12px; gap: 0; }
-  .sidebar { width: 280px; background: #fff; border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; flex-shrink: 0; display: flex; flex-direction: column; transition: width .18s ease; }
-  .sidebar.dragging { transition: none; }
-  .sidebar.collapsed { width: 48px; }
-  /* 拖拽分隔条：位于侧栏与 console 之间，宽度即两者间距（原 gap:12px 改由它承担），hover 显示蓝色手柄线 */
-  .sidebar-resizer { width: 12px; flex-shrink: 0; cursor: col-resize; position: relative; }
-  .sidebar-resizer::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); width: 3px; border-radius: 2px; background: transparent; transition: background .15s; }
-  .sidebar-resizer:hover::before, .sidebar-resizer.dragging::before { background: #165dff; }
-  .sidebar.collapsed + .sidebar-resizer { pointer-events: none; opacity: 0; }
-  /* 侧栏顶部工具栏：左侧放折叠切换按钮，右侧放"新建项目"按钮 */
-  .sidebar-header { padding: 10px 12px; border-bottom: 1px solid #f2f3f5; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  .main { flex: 1; display: flex; overflow: hidden; min-height: 0; padding: 0; gap: 0; }
+  /* 左侧固定抽屉：活动栏右边的停靠面板容器（项目/文件/Git 三选一），固定参与 flex 布局
+     （挤压终端区而非浮动遮挡），点外部不收起；宽度拖拽可调并持久化，收起时 display:none。 */
+  .side-drawer { width: 280px; overflow: hidden; flex-shrink: 0; display: none; flex-direction: column; transition: width .18s ease; }
+  .side-drawer.open { display: flex; }
+  .side-drawer.dragging { transition: none; }
+  .side-panel { flex: 1; min-width: 0; min-height: 0; display: none; flex-direction: column; overflow: hidden; }
+  /* 三面板统一深色系（与终端区同色板 #1d1f21/#232528/#2a2e33/#3a3c3f） */
+  .panel-project, .panel-file, .panel-git { background: #1d1f21; border-right: 1px solid #3a3c3f; }
+  /* 拖拽分隔条：位于抽屉与 console 之间，宽度 0（不留间距），仅保留 3px 透明热区供拖拽，hover 显示蓝色手柄线 */
+  .side-drawer-resizer { width: 0; flex-shrink: 0; cursor: col-resize; position: relative; }
+  .side-drawer-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2px; width: 4px; border-radius: 0; background: transparent; transition: background .15s; }
+  .side-drawer-resizer:hover::before, .side-drawer-resizer.dragging::before { background: #165dff; }
+  .main.drawer-closed .side-drawer-resizer { pointer-events: none; opacity: 0; }
+  /* 项目面板顶部工具栏：左侧折叠/展开卡片按钮，右侧"新建项目"按钮 */
+  .panel-project .sidebar-header { padding: 10px 12px; border-bottom: 1px solid #2a2e33; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
   .sidebar-header .sidebar-tools { display: flex; align-items: center; gap: 2px; }
   .sidebar-header .collapse-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; color: #86909c; border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: background .15s, color .15s; }
-  .sidebar-header .collapse-btn:hover { background: #f2f3f5; color: #4e5969; }
-  .sidebar-header .collapse-btn svg { width: 17px; height: 17px; transition: transform .18s ease; }
-  .sidebar.collapsed .collapse-btn svg { transform: rotate(180deg); }
+  .sidebar-header .collapse-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .sidebar-header .collapse-btn svg { width: 17px; height: 17px; }
   .sidebar-header button { background: #165dff; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .sidebar-header button:hover { background: #0e42d2; }
-  .sidebar-header .collapse-btn { background: none; }
-  .sidebar-header .collapse-btn:hover { background: #f2f3f5; }
   .sidebar-list { flex: 1; overflow-y: auto; min-height: 0; }
-  .sidebar .empty { padding: 40px 20px; color: #86909c; font-size: 13px; text-align: center; }
-  /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片 */
-  .project-item { margin: 0 10px 12px; padding: 12px 16px 10px; border: 1px solid #e5e6eb; border-radius: 6px; background: #fff; display: flex; flex-direction: column; gap: 4px; }
-  /* 卡片本身不可点、无激活态（日志查看入口走状态按钮），保留 hover 浅灰底反馈 */
-  .project-item:hover { background: #f7f8fa; }
+  .panel-project .empty { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; }
+  /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片（深色系，紧凑间距：
+     左右 margin 与卡片纵向间距一致） */
+  .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; }
+  /* 卡片本身不可点、无激活态（日志查看入口走状态按钮），保留 hover 微亮反馈 */
+  .project-item:hover { background: #2a2e33; }
   /* 拖拽排序：拖动中的卡片提升为浮动副本，贴随光标；原位用虚框占位。 */
   .project-item.drag-ghost { position: fixed !important; z-index: 9999; margin: 0; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.18); opacity: .96; transform: rotate(-1deg); transition: none; }
-  .project-item.drag-placeholder { opacity: .35; border-style: dashed; border-color: #165dff; background: #f0f7ff; }
+  .project-item.drag-placeholder { opacity: .35; border-style: dashed; border-color: #165dff; background: #2a3a4f; }
   /* 拖动中其余卡片让位过渡（仅 translateY，避免重排抖动） */
   .sidebar-list.dragging .project-item:not(.drag-ghost):not(.drag-placeholder) { transition: transform .16s ease; }
   /* 拖动期间禁用整页文本选区，避免划过卡片文字被选中 */
   body.dragging-project, body.dragging-project * { user-select: none !important; -webkit-user-select: none !important; }
   .project-item { touch-action: none; }
-  /* 折叠态项目图标：圆形 avatar，展开态隐藏，折叠态显示并隐藏文本/操作区 */
-  .project-item .avatar { display: none; }
-  .sidebar.collapsed .project-item .avatar { display: flex; width: 36px; height: 36px; border-radius: 50%; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; position: relative; flex-shrink: 0; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
-  .sidebar.collapsed .project-item .avatar .dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border: 2px solid #fff; }
-  .sidebar.collapsed .project-item .avatar .dot.stopped { background: #a9aeb8; }
-  .sidebar.collapsed .project-item:hover .avatar { transform: none; box-shadow: none; }
-  .sidebar.collapsed .project-item.active .avatar { box-shadow: none; }
-  .sidebar.collapsed .project-item.active:hover .avatar { box-shadow: none; }
-  /* 折叠态整栏结构：仅图标列，隐藏文本/操作/会话区块 */
-  .sidebar.collapsed .sidebar-header { justify-content: center; padding: 10px 0; }
-  .sidebar.collapsed .sidebar-header .create-btn,
-  .sidebar.collapsed .sidebar-header .collapse-all-btn,
-  .sidebar.collapsed .sidebar-header .expand-all-btn { display: none; }
-  .sidebar.collapsed .sidebar-list { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
-  .sidebar.collapsed .project-item { margin: 0; padding: 8px 0; border: none; border-radius: 0; align-items: center; background: transparent; }
-  .sidebar.collapsed .project-item.active { border-left: none; padding-left: 0; background: transparent; }
-  .sidebar.collapsed .project-item .row, .sidebar.collapsed .project-item .meta, .sidebar.collapsed .project-item .project-actions { display: none; }
-  .sidebar.collapsed .term-block { display: none; }
-  .sidebar.collapsed .sidebar-footer { justify-content: center; padding: 8px 0; }
-  .sidebar.collapsed .empty { padding: 30px 4px; font-size: 12px; word-break: break-all; }
+  /* 侧栏整体折叠已移除：avatar 结构彻底删除，JS 不再按折叠态分支 */
   .project-item .row { display: flex; align-items: center; }
-  .project-item .name { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project-item .name { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3e3e3; }
   /* 折叠按钮：置于名称行右侧（badge 旁），复用操作按钮的图标按钮风格；折叠态旋转成展开图标 */
-  .project-item .collapse-item-btn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #e5e6eb; background: #fff; border-radius: 5px; cursor: pointer; color: #86909c; flex-shrink: 0; margin-left: 6px; transition: all .15s; }
-  .project-item .collapse-item-btn:hover { color: #165dff; border-color: #a8d3ff; background: #e8f3ff; }
+  .project-item .collapse-item-btn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #3a3c3f; background: transparent; border-radius: 5px; cursor: pointer; color: #86909c; flex-shrink: 0; margin-left: 6px; transition: all .15s; }
+  .project-item .collapse-item-btn:hover { color: #79a8ff; border-color: #165dff; background: #2a3a4f; }
   .project-item .collapse-item-btn svg { width: 12px; height: 12px; display: block; transition: transform .15s ease; }
   .project-item.collapsed .collapse-item-btn svg { transform: rotate(180deg); }
   /* 项目卡片折叠态：只显示一行项目名称 + 类型标签 + 折叠按钮，隐藏 meta / 操作按钮 / 终端会话区 */
   .project-item.collapsed .meta, .project-item.collapsed .project-actions, .project-item.collapsed .term-block { display: none; }
-  .project-item.collapsed .avatar { display: none; }
   /* meta 行：路径可截断（ellipsis + tooltip 见 title 属性），运行状态提示固定不截断 */
   .project-item .meta { font-size: 12px; color: #86909c; display: flex; align-items: center; gap: 6px; min-width: 0; }
   .project-item .meta .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .project-item .meta .status { flex-shrink: 0; white-space: nowrap; }
   /* 运行状态按钮：点击显示宿主日志。复用操作按钮风格，运行中绿、已停止灰 */
-  .project-item .meta .status-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid #e5e6eb; background: #fff; border-radius: 11px; cursor: pointer; font-size: 11px; color: #86909c; transition: background .15s, color .15s, border-color .15s; }
-  .project-item .meta .status-btn:hover { background: #f2f3f5; }
-  .project-item .meta .status-btn.running { color: #00b42a; border-color: #b3e8c2; }
-  .project-item .meta .status-btn.running:hover { background: #e8fff0; border-color: #00b42a; }
+  .project-item .meta .status-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid #3a3c3f; background: transparent; border-radius: 11px; cursor: pointer; font-size: 11px; color: #86909c; transition: background .15s, color .15s, border-color .15s; }
+  .project-item .meta .status-btn:hover { background: #3a3c3f; }
+  .project-item .meta .status-btn.running { color: #00b42a; border-color: #173b1f; }
+  .project-item .meta .status-btn.running:hover { background: #173b1f; border-color: #00b42a; }
   .project-item .meta .status-btn .dot { width: 6px; height: 6px; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; margin-left: 8px; flex-shrink: 0; }
-  .badge.node { background: #e8f3ff; color: #165dff; }
-  .badge.springboot { background: #fff3e8; color: #f77234; }
-  .badge.folder { background: #e8f7e8; color: #389e0d; }
+  .badge.node { background: #1c2f4a; color: #79a8ff; }
+  .badge.springboot { background: #4a3315; color: #ff8f1f; }
+  .badge.folder { background: #173b1f; color: #4cd964; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .dot.running { background: #00b42a; }
   .dot.stopped { background: #a9aeb8; }
   .project-actions { display: flex; gap: 6px; margin-top: 4px; }
-  .project-actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #e5e6eb; background: #fff; border-radius: 5px; cursor: pointer; color: #4e5969; transition: background .15s, color .15s, border-color .15s; }
-  .project-actions button:hover { background: #f2f3f5; }
+  .project-actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #3a3c3f; background: transparent; border-radius: 5px; cursor: pointer; color: #a9aeb8; transition: background .15s, color .15s, border-color .15s; }
+  .project-actions button:hover { background: #3a3c3f; }
   .project-actions button svg { width: 14px; height: 14px; display: block; }
-  .project-actions button.start { color: #00b42a; border-color: #b3e8c2; }
-  .project-actions button.start:hover { background: #e8fff0; border-color: #00b42a; }
-  .project-actions button.stop { color: #f53f3f; border-color: #fbc4c4; }
-  .project-actions button.stop:hover { background: #ffece8; border-color: #f53f3f; }
-  .project-actions button.edit:hover { color: #165dff; border-color: #a8d3ff; background: #e8f3ff; }
-  .project-actions button.restart { color: #ff8f1f; border-color: #fcd9b6; }
-  .project-actions button.restart:hover { background: #fff3e8; border-color: #ff8f1f; }
-  .project-actions button.cmd { color: #722ed1; border-color: #d3adf7; }
-  .project-actions button.cmd:hover { background: #f9f0ff; border-color: #722ed1; }
-  .project-actions button.del:hover { color: #f53f3f; border-color: #fbc4c4; background: #ffece8; }
-  /* 侧栏底部：设置入口（齿轮按钮），与项目操作按钮同款图标按钮风格 */
-  .sidebar-footer { flex-shrink: 0; border-top: 1px solid #f2f3f5; background: #fff; padding: 8px 10px; display: flex; align-items: center; }
-  .sidebar-footer .gear-btn { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #e5e6eb; background: #fff; border-radius: 5px; cursor: pointer; color: #4e5969; transition: background .15s, color .15s, border-color .15s; }
-  .sidebar-footer .gear-btn:hover { color: #165dff; border-color: #a8d3ff; background: #e8f3ff; }
-  .sidebar-footer .gear-btn svg { width: 17px; height: 17px; display: block; }
+  .project-actions button.start { color: #00b42a; border-color: #173b1f; }
+  .project-actions button.start:hover { background: #173b1f; border-color: #00b42a; }
+  .project-actions button.stop { color: #f56a6a; border-color: #4a1a1a; }
+  .project-actions button.stop:hover { background: #4a1a1a; border-color: #f56a6a; }
+  .project-actions button.edit:hover { color: #79a8ff; border-color: #165dff; background: #2a3a4f; }
+  .project-actions button.restart { color: #ff8f1f; border-color: #4a3315; }
+  .project-actions button.restart:hover { background: #4a3315; border-color: #ff8f1f; }
+  .project-actions button.cmd { color: #c79bff; border-color: #3d2a4a; }
+  .project-actions button.cmd:hover { background: #3d2a4a; border-color: #c79bff; }
+  .project-actions button.del:hover { color: #f56a6a; border-color: #4a1a1a; background: #4a1a1a; }
+  /* 活动栏底部：设置入口（齿轮按钮），贴底 */
+  .activity-bar .gear-btn { margin-top: auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; border-radius: 5px; cursor: pointer; color: #86909c; transition: color .12s, background .12s; }
+  .activity-bar .gear-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .activity-bar .gear-btn svg { width: 17px; height: 17px; display: block; }
   /* 终端会话区块（claude / codex）：合并进项目卡片的会话子区域，
-     分隔线以下直接继承卡片背景（选中/悬停浅色时与会话区同色），
+     分隔线以下直接继承卡片背景（深色卡片时与会话区同色），
      左竖线经 .project-item 的 border-left 贯穿到本区域。
      点击不冒泡到 selectProject。Claude/Codex logo 保留品牌橙做点缀。 */
-  .term-block { margin: 0; padding: 6px 0 8px; border-top: 1px solid #f2f3f5; }
-  /* 新建终端会话：并排两个可点击按钮（虚线描边 + 文字），hover 橙色淡底/描边（与品牌橙 logo 同色系，和项目卡片蓝色选中态区分） */
+  .term-block { margin: 0; padding: 6px 0 8px; border-top: 1px solid #2a2e33; }
+  /* 新建终端会话：并排可点击图标按钮，hover 橙色描边/深橙底（与品牌橙 logo 同色系，和项目卡片蓝色高亮区分） */
   .term-new-row { display: flex; gap: 6px; }
-  .term-new-row button { flex: 0 0 26px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px dashed #fcd9b6; background: #fff; border-radius: 5px; cursor: pointer; color: #ff8f1f; transition: all .15s; }
-  .term-new-row button:hover { background: #fff3e8; border-color: #ff8f1f; color: #ff8f1f; box-shadow: 0 1px 4px rgba(255,143,31,.18); }
+  .term-new-row button { flex: 0 0 26px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px dashed #4a3315; background: transparent; border-radius: 5px; cursor: pointer; color: #ff8f1f; transition: all .15s; }
+  .term-new-row button:hover { background: #4a3315; border-color: #ff8f1f; color: #ff8f1f; box-shadow: 0 1px 4px rgba(255,143,31,.18); }
   .claude-logo, .codex-logo, .cmd-logo, .pi-logo { display: inline-block; vertical-align: middle; }
   /* pi 官网 logo viewBox 内图形留白多（图形仅占约 59% 区间），同尺寸下视觉偏小，
      故单独放大一档，与其他 logo 视觉重量对齐。 */
   .pi-logo { width: 18px; height: 18px; }
-  .term-new-row button .claude-logo, .term-new-row button .codex-logo, .term-new-row button .cmd-logo, .term-new-row button .pi-logo, .term-new-row button .folder-logo { width: 14px; height: 14px; color: #D97757; }
+  .term-new-row button .claude-logo, .term-new-row button .codex-logo, .term-new-row button .cmd-logo, .term-new-row button .pi-logo, .term-new-row button .folder-logo, .term-new-row button .git-logo { width: 14px; height: 14px; color: #D97757; }
   .term-new-row button .pi-logo { width: 18px; height: 18px; }
   .sub-menu-item .claude-logo, .sub-menu-item .codex-logo, .sub-menu-item .cmd-logo, .sub-menu-item .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; }
   .sub-menu-item .pi-logo { width: 17px; height: 17px; }
   .pane-tab .pane-title .claude-logo, .pane-tab .pane-title .codex-logo, .pane-tab .pane-title .cmd-logo, .pane-tab .pane-title .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; margin-right: 3px; vertical-align: -2px; }
   .pane-tab .pane-title .pi-logo { width: 17px; height: 17px; }
-  .project-actions button:disabled { opacity: 0.35; cursor: not-allowed; background: #fff; }
-  .console { flex: 1; display: flex; flex-direction: column; background: #1d1f21; min-width: 0; min-height: 0; border-radius: 8px; overflow: hidden; position: relative; }
+  .project-actions button:disabled { opacity: 0.35; cursor: not-allowed; background: transparent; }
+  /* console：右缘不再有活动栏，恢复纯 column 结构（分栏区 + 底部日志抽屉）。
+     活动栏移到 .main 最左侧（项目/文件/Git 三开关 + 底部齿轮设置）。 */
+  .console { flex: 1; display: flex; flex-direction: column; background: #1d1f21; min-width: 0; min-height: 0; border-radius: 0; overflow: hidden; }
+  /* 活动栏：VSCode 风格窄竖条，位于最左缘；项目/文件/Git 三开关图标纵向排列，
+     抽屉开着时对应图标高亮；底部齿轮为设置入口。 */
+  .activity-bar { flex-shrink: 0; width: 36px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; background: #232528; border-right: 1px solid #3a3c3f; }
+  .activity-bar button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 5px; transition: color .12s, background .12s; }
+  .activity-bar button:hover { background: #3a3c3f; color: #e3e3e3; }
+  .activity-bar button.active { color: #165dff; background: #2a3a4f; }
+  .activity-bar button svg { width: 17px; height: 17px; display: block; }
+  .console-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
   .console-body { flex: 1; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; min-height: 0; }
   .console-body .placeholder { color: #6b6d70; font-style: italic; }
   .pane-log { white-space: pre-wrap; word-break: break-all; }
@@ -242,16 +234,16 @@
   /* 终端会话二级菜单：有会话时才显示，下挂各会话窗口 */
   .sub-menu { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
   .sub-menu-group { padding: 5px 12px 3px; font-size: 11px; color: #86909c; font-weight: 600; }
-  /* 会话项：白色小卡片，hover 浅灰（同项目卡片），active 橙底高亮（与新建按钮 hover 同色系，
-     和项目卡片蓝色选中态区分），logo 保留品牌橙作点缀 */
-  .sub-menu-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 1px solid #e5e6eb; background: #fff; cursor: pointer; font-size: 12px; color: #4e5969; transition: all .12s; }
-  .sub-menu-item:hover { background: #f7f8fa; border-color: #c9cdd4; color: #4e5969; }
-  .sub-menu-item.active { background: #fff3e8; border-color: #fcd9b6; color: #ff8f1f; font-weight: 600; }
+  /* 会话项：深色小卡片（同项目卡片色系），hover 微亮，active 橙底高亮（与新建按钮 hover 同色系，
+     和项目卡片蓝色高亮区分），logo 保留品牌橙作点缀 */
+  .sub-menu-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 1px solid #3a3c3f; background: #1d1f21; cursor: pointer; font-size: 12px; color: #a9aeb8; transition: all .12s; }
+  .sub-menu-item:hover { background: #2a2e33; border-color: #4e5969; color: #e3e3e3; }
+  .sub-menu-item.active { background: #4a3315; border-color: #ff8f1f; color: #ff8f1f; font-weight: 600; }
   .sub-menu-item .label { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sub-menu-item .close-x { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #c9cdd4; cursor: pointer; border-radius: 3px; flex-shrink: 0; }
-  .sub-menu-item .close-x:hover { background: #ffece8; color: #f53f3f; }
+  .sub-menu-item .close-x { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #6b6d70; cursor: pointer; border-radius: 3px; flex-shrink: 0; }
+  .sub-menu-item .close-x:hover { background: #4a1a1a; color: #f56a6a; }
   .sub-menu-item .new-icon { font-size: 14px; }
-  .sub-menu-empty { padding: 7px 12px; font-size: 11px; color: #c9cdd4; }
+  .sub-menu-empty { padding: 7px 12px; font-size: 11px; color: #6b6d70; }
   /* 分栏容器：横向 flex，每栏等分；分隔条可拖拽调宽（相邻两栏）。 */
   .console-body { position: relative; display: flex; flex-direction: row; }
   .pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
@@ -286,9 +278,7 @@
   .pane-header .pane-tools .pane-split { border: 1px solid #e5e6eb; background: #fff; color: #1f2329; }
   .pane-header .pane-tools .pane-split:hover:not(:disabled) { border-color: #165dff; background: #f2f3f5; color: #165dff; }
   .pane-header .pane-tools .pane-split:disabled { opacity: .4; }
-  /* 文件目录浏览按钮：与分栏按钮同款白底描边高亮，但不参与分栏满栏禁用态 */
-  .pane-header .pane-tools .pane-file { border: 1px solid #e5e6eb; background: #fff; color: #1f2329; }
-  .pane-header .pane-tools .pane-file:hover { border-color: #165dff; background: #f2f3f5; color: #165dff; }
+  /* 文件目录浏览按钮样式已移除：入口移至最左活动栏（activity-bar） */
   .pane-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   /* 日志面板：每栏独立实例，铺满本栏 body */
   .pane-log { position: absolute; inset: 0; overflow-y: auto; padding: 10px 16px; box-sizing: border-box; }
@@ -377,17 +367,16 @@
   .console:not(.log-drawer-open) .log-drawer-pin { display: none; }
   /* 抽屉内分栏区：与终端区 console-body 同结构同样式（复用 .pane/.pane-header/.pane-log） */
   .log-drawer-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: row; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; }
-  /* ---------- 文件目录浏览抽屉（右侧可折叠） ----------
-     与底部日志抽屉同构：贴在 .console 右侧边缘，可折叠/可拖拽调宽/浮动叠层。
-     .main 已是 flex row（sidebar + resizer + console）；抽屉作为 .console 的子层用
-     absolute 浮在右侧，不破坏现有 flex 流（console-body 仍占满），展开时带阴影叠层。 */
-  .file-drawer-resizer { position: absolute; top: 0; bottom: 0; right: var(--file-drawer-w, 280px); width: 8px; margin-right: -4px; cursor: col-resize; z-index: 26; display: none; }
-  .file-drawer-resizer::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); width: 3px; border-radius: 2px; background: transparent; transition: background .15s; }
-  .file-drawer-resizer:hover::before, .file-drawer-resizer.dragging::before { background: #165dff; }
-  .console.file-drawer-open .file-drawer-resizer { display: block; }
-  .file-drawer { position: absolute; top: 0; bottom: 0; right: 0; width: var(--file-drawer-w, 280px); background: #1d1f21; border-left: 1px solid #3a3c3f; box-shadow: -6px 0 18px rgba(0,0,0,.35); display: flex; flex-direction: column; z-index: 24; transform: translateX(100%); transition: transform .18s ease, width .18s ease; overflow: hidden; }
-  .console.file-drawer-open .file-drawer { transform: translateX(0); }
-  .file-drawer.dragging { transition: none !important; }
+  /* ---------- 文件目录浏览面板（左侧固定抽屉） ----------
+     原 .console 右缘浮动叠层已并入左侧 .side-drawer（panel-file），固定停靠挤压终端区；
+     不再需要独立调宽条/浮动定位，宽度统一走抽屉容器 sideDrawerWidth。 */
+  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
+  .file-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .file-drawer-header .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .file-drawer-header .pane-btn:disabled:hover { background: transparent; color: #86909c; }
+  .file-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
   .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
   .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
@@ -421,30 +410,155 @@
   .file-tree-children { overflow: hidden; }
   .file-tree-empty { padding: 30px 16px; color: #6b6d70; font-size: 12px; text-align: center; font-style: italic; }
   .file-tree-loading { padding: 14px 16px; color: #6b6d70; font-size: 12px; font-style: italic; }
+  /* ---------- Git 面板（左侧固定抽屉） ----------
+     原 .console 右缘浮动抽屉已并入左侧 .side-drawer（panel-git），与文件面板互斥显示。 */
+  .git-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .git-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
+  .git-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .git-drawer-header .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .git-drawer-header .pane-btn:disabled:hover { background: transparent; color: #86909c; }
+  .git-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
+  .git-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 12px; color: #e3e3e3; }
+  .git-drawer-body::-webkit-scrollbar { width: 8px; }
+  .git-drawer-body::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
+  /* 分支区：分支名 + 切换下拉 + push/pull */
+  .git-branch-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .git-branch-name { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-branch-name svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .git-branch-row select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid #3a3c3f; border-radius: 5px; background: #2a2e33; color: #e3e3e3; font-size: 12px; }
+  .git-branch-row .pane-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
+  .git-branch-row .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .git-branch-row .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .git-branch-row .pane-btn svg { width: 14px; height: 14px; display: block; }
+  .git-net-row { display: flex; gap: 6px; margin-bottom: 10px; }
+  .git-net-row button { flex: 1; padding: 5px 0; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 5px; font-size: 12px; cursor: pointer; transition: all .12s; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .git-net-row button:hover { color: #e3e3e3; border-color: #165dff; background: #2a3a4f; }
+  .git-net-row button:disabled { opacity: .4; cursor: not-allowed; }
+  /* push/pull 按钮上的领先/落后数字徽标：ahead 橙（待推送）、behind 蓝（待拉取），无差异不渲染 */
+  .git-net-row .git-ab { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 1; }
+  .git-net-row .git-ab.ahead { background: #4a3315; color: #ff8f1f; }
+  .git-net-row .git-ab.behind { background: #1c2f4a; color: #79a8ff; }
+  /* 分组标题：staged / unstaged / 历史。padding-left 与 .git-file-row 一致，全选勾选框与文件勾选框纵向对齐 */
+  .git-section-title { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; padding-left: 6px; font-size: 11px; color: #86909c; font-weight: 600; }
+  .git-section-title .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 500; }
+  /* 分组标题全选勾选框：与文件行勾选框同宽纵向对齐 */
+  .git-section-title input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; }
+  /* 变更文件行：勾选框 + 状态标 + 文件名；点文件名看 diff */
+  .git-file-row { display: flex; align-items: center; gap: 6px; height: 26px; margin-left: 16px; padding: 0 6px; border-radius: 5px; cursor: default; user-select: none; }
+  .git-file-row:hover { background: #2a2e33; }
+  .git-file-row input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; }
+  .git-file-row .st { flex-shrink: 0; width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 3px; font-size: 10px; font-weight: 700; font-family: Consolas, monospace; }
+  .git-file-row .st.M { background: #4a3315; color: #ff8f1f; }
+  .git-file-row .st.A { background: #173b1f; color: #4cd964; }
+  .git-file-row .st.D { background: #4a1a1a; color: #f56a6a; }
+  .git-file-row .st.U { background: #1c2f4a; color: #79a8ff; }
+  .git-file-row .st.R { background: #3d2a4a; color: #c79bff; }
+  .git-file-row .st.Q { background: #33363a; color: #a9aeb8; }  /* ? 未跟踪（class 不支持 ? 字符，映射为 Q） */
+  .git-file-row .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .git-file-row .fname:hover { text-decoration: underline; color: #79a8ff; }
+  /* 提交区：textarea + 提交按钮 */
+  .git-commit-area { margin-top: 10px; border-top: 1px solid #2a2e33; padding-top: 8px; }
+  .git-commit-area textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #3a3c3f; border-radius: 5px; background: #2a2e33; color: #e3e3e3; font-size: 12px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; resize: vertical; min-height: 48px; }
+  .git-commit-area textarea:focus { outline: none; border-color: #165dff; }
+  .git-commit-btns { margin-top: 6px; display: flex; gap: 6px; }
+  .git-commit-btn { flex: 1; padding: 6px 0; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 12px; cursor: pointer; transition: background .12s; }
+  .git-commit-btn:hover { background: #0e42d2; }
+  .git-commit-btn:disabled { opacity: .4; cursor: not-allowed; }
+  /* 提交并推送：次级按钮，深色底不抢主按钮视觉 */
+  .git-commit-btn.secondary { background: #2a2e33; color: #a9aeb8; border: 1px solid #3a3c3f; }
+  .git-commit-btn.secondary:hover { background: #2a3a4f; color: #e3e3e3; border-color: #165dff; }
+  /* 历史提交行 */
+  .git-log-row { padding: 5px 6px; border-radius: 5px; cursor: pointer; }
+  .git-log-row:hover { background: #2a2e33; }
+  .git-log-row .subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .git-log-row .meta { font-size: 10px; color: #6b6d70; margin-top: 1px; display: flex; gap: 8px; align-items: center; }
+  .git-log-row .meta .hash { font-family: Consolas, monospace; color: #79a8ff; }
+  /* 历史行「未推送」徽标：橙色小标签（与推送按钮 ahead 徽标同色系），已推送不渲染 */
+  .git-log-row .git-push-badge { flex-shrink: 0; background: #4a3315; color: #ff8f1f; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 600; line-height: 14px; }
+  /* 历史条目展开：提交行下方的变更文件列表（缩进对齐提交行） */
+  .git-log-item { border-radius: 5px; }
+  .git-log-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 5px; font-size: 9px; font-weight: 500; }
+  .git-log-files { margin: 2px 0 6px 14px; padding: 2px 0; border-left: 2px solid #3a3c3f; }
+  .git-log-file { display: flex; align-items: baseline; gap: 4px; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; overflow: hidden; white-space: nowrap; }
+  .git-log-file:hover { background: #2a2e33; }
+  .git-log-file:hover .git-log-file-name { color: #79a8ff; text-decoration: underline; }
+  .git-log-file .git-log-file-name { color: #e3e3e3; flex-shrink: 0; }
+  .git-log-file .dir { color: #6b6d70; overflow: hidden; text-overflow: ellipsis; }
+  .git-log-file-empty { padding: 3px 8px; font-size: 10px; color: #6b6d70; font-style: italic; }
+  /* diff 预览模态框：左右对比布局（左旧右新，行对齐，同步滚动） */
+  .git-diff-modal { width: 1100px; max-width: 94vw; }
+  .git-diff-wrap { position: relative; }
+  .git-diff-loading { padding: 30px; text-align: center; color: #86909c; font-size: 13px; font-style: italic; }
+  .git-diff-cols { display: flex; gap: 8px; }
+  .git-diff-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .git-diff-col-head { flex-shrink: 0; padding: 5px 10px; background: #2a2e33; border-radius: 5px 5px 0 0; font-size: 11px; font-weight: 600; color: #86909c; user-select: none; }
+  .git-diff-col:first-child .git-diff-col-head { border-bottom: 1px solid rgba(245,106,106,.25); }
+  .git-diff-col:last-child .git-diff-col-head { border-bottom: 1px solid rgba(76,217,100,.25); }
+  .git-diff-pre { margin: 0; border-radius: 0 0 6px 6px; height: 60vh; overflow: auto; font-size: 12px; line-height: 1.55; tab-size: 4; }
+  .git-diff-pre .dl { display: block; white-space: pre; }
+  .git-diff-pre .diff-add { color: #4cd964; background: rgba(76,217,100,.1); display: block; }
+  .git-diff-pre .diff-del { color: #f56a6a; background: rgba(245,106,106,.1); display: block; }
+  .git-diff-pre .diff-hunk { color: #79a8ff; display: block; }
+  .git-diff-pre .diff-ctx { color: #a9aeb8; display: block; }
+  .git-empty { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; text-align: center; }
+  .git-loading { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; }
+  .git-not-repo { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; line-height: 1.8; }
 </style>
 </head>
 <body>
 
 <div class="main">
-  <div class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-tools">
-        <button class="collapse-btn" id="collapseBtn" title="折叠侧栏" onclick="toggleSidebar()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></button>
-        <button class="collapse-btn collapse-all-btn" title="全部折叠项目卡片" onclick="collapseAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg></button>
-        <button class="collapse-btn expand-all-btn" title="全部展开项目卡片" onclick="expandAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg></button>
+  <!-- 活动栏：最左缘窄竖条，项目/文件/Git 三面板的开关图标（与面板开态联动高亮），
+       底部齿轮为设置入口。点击展开对应面板，再点同一按钮收起整个抽屉。 -->
+  <div class="activity-bar">
+    <button id="activityProjectBtn" title="项目列表" onclick="toggleSidePanel('project')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></button>
+    <button id="activityFileBtn" title="文件目录浏览" onclick="toggleSidePanel('file')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></button>
+    <button id="activityGitBtn" title="Git 管理" onclick="toggleSidePanel('git')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+    <button class="gear-btn" title="设置（终端/日志字体）" onclick="openSettingsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
+  <!-- 左侧固定抽屉：三面板共用一个停靠容器（互斥显示），固定挤压终端区，点外部不收起 -->
+  <div class="side-drawer" id="sideDrawer">
+    <!-- 项目面板：原侧栏内容原封迁移 -->
+    <div class="side-panel panel-project" id="panelProject">
+      <div class="sidebar-header">
+        <div class="sidebar-tools">
+          <button class="collapse-btn collapse-all-btn" title="全部折叠项目卡片" onclick="collapseAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg></button>
+          <button class="collapse-btn expand-all-btn" title="全部展开项目卡片" onclick="expandAllProjects()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg></button>
+        </div>
+        <button class="create-btn" onclick="openCreateModal()">+ 新建项目</button>
       </div>
-      <button class="create-btn" onclick="openCreateModal()">+ 新建项目</button>
+      <div class="sidebar-list" id="sidebarList">
+        <div class="empty">暂无项目，点击上方新建项目</div>
+      </div>
     </div>
-    <div class="sidebar-list" id="sidebarList">
-      <div class="empty">暂无项目，点击上方新建项目</div>
+    <!-- 文件面板：原右缘文件抽屉内容原封迁移（header + 面包屑 + 树） -->
+    <div class="side-panel panel-file" id="panelFile">
+      <div class="file-drawer-header">
+        <span class="file-drawer-title" id="fileDrawerTitle">文件</span>
+        <button class="pane-btn" id="fileDrawerRefresh" title="刷新" onclick="refreshFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        <button class="pane-btn" id="fileDrawerExplorer" title="在资源管理器中打开" onclick="openExplorerFromFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+        <button class="pane-btn" title="关闭" onclick="closeFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </div>
+      <div class="file-drawer-breadcrumb" id="fileDrawerBreadcrumb"></div>
+      <div class="file-drawer-tree" id="fileDrawerTree"></div>
     </div>
-    <!-- 侧栏底部：设置入口（齿轮按钮，置左），打开终端/日志字体设置 -->
-    <div class="sidebar-footer">
-      <button class="gear-btn" title="设置（终端/日志字体）" onclick="openSettingsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    <!-- Git 面板：原右缘 Git 抽屉内容原封迁移 -->
+    <div class="side-panel panel-git" id="panelGit">
+      <div class="git-drawer-header">
+        <span class="git-drawer-title" id="gitDrawerTitle">Git</span>
+        <button class="pane-btn" id="gitDrawerRefresh" title="刷新" onclick="refreshGitDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        <button class="pane-btn" title="关闭" onclick="closeGitDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </div>
+      <div class="git-drawer-body" id="gitDrawerBody">
+        <div class="git-empty">未选择项目</div>
+      </div>
     </div>
   </div>
-  <div class="sidebar-resizer" id="sidebarResizer"></div>
+  <!-- 抽屉调宽拖拽条：位于抽屉与终端区之间，三面板共用同一宽度 -->
+  <div class="side-drawer-resizer" id="sideDrawerResizer"></div>
   <div class="console">
+    <div class="console-main">
     <!-- 分栏容器：renderPanes() 动态渲染 N 个 .pane（横向等分，1~4 栏）。
          每栏 .pane-header = 标题栏条：左侧 .pane-tab（tab 形状标题），右侧 .pane-tools（关闭 + 分栏按钮，
          分栏按钮仅最右栏显示，描边高亮与 tab 明显区分）。布局持久化到 localStorage（paneLayout）。 -->
@@ -466,20 +580,7 @@
       </div>
       <div class="log-drawer-body" id="logConsoleBody"></div>
     </div>
-    <!-- 文件目录浏览抽屉：右侧可折叠，贴在 console 右边缘浮动叠层。
-         项目/展开层级/选中态持久化，与分栏窗口解耦；唯一切换项目入口是侧栏卡片文件夹按钮。
-         懒加载：点目录展开才请求 /api/projects/:id/files?sub=... -->
-    <div class="file-drawer-resizer" id="fileDrawerResizer"></div>
-    <div class="file-drawer" id="fileDrawer">
-      <div class="file-drawer-header">
-        <span class="file-drawer-title" id="fileDrawerTitle">文件</span>
-        <button class="pane-btn" id="fileDrawerRefresh" title="刷新" onclick="refreshFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
-        <button class="pane-btn" id="fileDrawerExplorer" title="在资源管理器中打开" onclick="openExplorerFromFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
-        <button class="pane-btn" title="关闭" onclick="closeFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
-      </div>
-      <div class="file-drawer-breadcrumb" id="fileDrawerBreadcrumb"></div>
-      <div class="file-drawer-tree" id="fileDrawerTree"></div>
-    </div>
+    </div><!-- /console-main -->
   </div>
 </div>
 
@@ -540,6 +641,24 @@
   </div>
 </div>
 
+<!-- Git diff 左右对比模态框：左旧右新，按 hunk 对齐行，双栏同步滚动 -->
+<div class="modal-overlay" id="gitDiffOverlay">
+  <div class="modal git-diff-modal">
+    <button type="button" class="modal-close" onclick="closeGitDiffModal()" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+    <h2 id="gitDiffTitle">diff</h2>
+    <div class="git-diff-wrap" id="gitDiffWrap">
+      <div class="git-diff-loading" id="gitDiffLoading">加载中…</div>
+      <div class="git-diff-cols" id="gitDiffCols" style="display:none">
+        <div class="git-diff-col"><div class="git-diff-col-head">旧（-）</div><pre class="git-diff-pre" id="gitDiffLeft"></pre></div>
+        <div class="git-diff-col"><div class="git-diff-col-head">新（+）</div><pre class="git-diff-pre" id="gitDiffRight"></pre></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeGitDiffModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 自绘提示 toast（替代原生 alert） -->
 <div class="toast" id="toast">
   <span class="toast-icon" id="toastIcon"></span>
@@ -559,6 +678,11 @@
 <!-- 文件树右键菜单：深色样式（与文件抽屉同色系），在资源管理器中打开选中项 -->
 <div class="file-context-menu" id="fileContextMenu">
   <button data-act="reveal">在资源管理器中打开</button>
+</div>
+
+<!-- Git 历史右键菜单：未推送的提交可软撤回（复用文件树菜单深色样式） -->
+<div class="file-context-menu" id="gitContextMenu">
+  <button data-act="undo">撤回此提交（软撤回）</button>
 </div>
 
 <!-- 自绘确认框（替代原生 confirm） -->
@@ -1231,7 +1355,7 @@ function renderPanes() {
   panes.forEach((p, i) => {
     const parts = [];
     const proj = projects.find(x => x.id === p.projectId);
-    parts.push(`<div class="pane ${p.id === activePaneId ? 'active' : ''}" data-pane-id="${p.id}" data-project-id="${p.projectId || ''}" data-pane-kind="term" onclick="activatePane('${p.id}')">`);
+    parts.push(`<div class="pane ${p.id === activePaneId ? 'active' : ''}" data-pane-id="${p.id}" data-project-id="${p.projectId || ''}" data-pane-kind="term" onclick="activatePane('term','${p.id}')">`);
     // Tab 标题：项目名套 badge（按项目类型配色，与侧栏卡片一致） + 视图后缀；空栏为「空白」
     let titleHtml = '空白';
     let titleText = '空白';
@@ -1258,8 +1382,7 @@ function renderPanes() {
       ? `<button class="pane-btn pane-split" title="横向分栏（最多 4 栏）" onclick="event.stopPropagation(); addPane('term')">${ICON_SPLIT}</button>` : '';
     // 文件目录浏览按钮：最右栏末端（分栏按钮后），纯粹打开文件抽屉（不绑定本栏项目，
     // 恢复上次打开的项目目录 + 展开层级 + 选中态）
-    const fileBtn = (i === panes.length - 1)
-      ? `<button class="pane-btn pane-file" title="文件目录浏览" onclick="event.stopPropagation(); openFileDrawer()">${ICON_FOLDER}</button>` : '';
+    const fileBtn = ''; // 文件目录浏览入口已移至最左活动栏（activity-bar），分栏标题栏不再重复
     // 各段之间以竖线分隔：只收集存在的段，再用 divider 拼接，避免相邻段各带一条竖线导致重复
     const tools = [closeBtn, splitBtn, fileBtn].filter(Boolean).join('<span class="pane-tools-divider"></span>');
     parts.push(`<div class="pane-header" data-pane-id="${p.id}" data-pane-kind="term" onpointerdown="startPaneDrag(event,'term','${p.id}')">
@@ -1545,12 +1668,39 @@ function activatePane(kind, paneId) {
   activePaneId = paneId;
   const act = activePane();
   currentId = act ? act.projectId : null;
+  // 文件/Git 面板展开时跟随激活栏项目：有项目则切换（文件恢复该项目展开状态），空白则不动
+  syncFileDrawerToPane(); syncGitDrawerToPane();
   // 同步标题栏 + 按钮状态 + 左侧高亮 + 激活栏终端 fit/focus
   renderPanes();
   renderList();
   updatePaneLogButtons();
   // 未固定时，切到终端会话栏自动收起日志抽屉，把空间还给终端
   if (!logDrawerPinned) closeLogDrawer();
+}
+
+// 文件面板跟随激活栏：面板展开中且激活栏项目与面板绑定项目不同时切换目录。
+// 激活栏空白/无项目 → 保持当前目录不动（不清空）。
+function syncFileDrawerToPane() {
+  if (sideDrawerPanel !== 'file') return;
+  const act = activePane();
+  const pid = act && act.projectId;
+  if (pid && pid !== fileDrawerProjectId) {
+    switchFileDrawerProject(pid);
+    renderFileDrawerTitle();
+    // 按该项目的记忆展开状态还原树：补拉根 + 缺失子层（与打开面板同一套还原逻辑）
+    restoreFileTreeExpanded();
+  }
+}
+
+// Git 面板跟随激活栏（与文件面板同语义）：面板展开中且激活栏项目变化时，
+// 切换到该项目并重拉 status/分支/历史；激活栏空白/无项目则保持当前项目不动。
+function syncGitDrawerToPane() {
+  if (sideDrawerPanel !== 'git') return;
+  const act = activePane();
+  const pid = act && act.projectId;
+  if (pid && pid !== gitDrawerProjectId) {
+    openGitDrawer(pid);
+  }
 }
 
 // ---------- 拖拽 pane 标题栏排序 ----------
@@ -1623,6 +1773,8 @@ async function showProjectLog(projectId) {
     // 已有该项目日志栏 → 激活它，不重拉（内容已在）
     activeLogPaneId = existing.id;
     currentId = projectId;
+    // 文件/Git 面板展开时跟随激活栏项目（此处 currentId 即被查看日志的项目）
+    syncFileDrawerToPane(); syncGitDrawerToPane();
     renderLogPanes();
     renderList();
     updatePaneLogButtons();
@@ -1641,6 +1793,8 @@ async function showProjectLog(projectId) {
 // 且该函数按 data-log-pane 容器 guard 自然防竞态（栏被移除后丢弃结果），此处无需再拉。
 function buildLogViewForPane(paneId, projectId) {
   currentId = projectId;
+  // 文件/Git 面板展开时跟随查日志的项目
+  syncFileDrawerToPane(); syncGitDrawerToPane();
   renderLogPanes();
   renderList();
   updatePaneLogButtons();
@@ -1654,6 +1808,8 @@ async function displaySession(projectId, sessionId) {
     // 已在某栏显示 → 激活它，不搬移
     activePaneId = existing.id;
     currentId = existing.projectId || projectId;
+    // 文件/Git 面板展开时跟随激活栏项目
+    syncFileDrawerToPane(); syncGitDrawerToPane();
     renderPanes();
     renderList();
     updatePaneLogButtons();
@@ -1665,6 +1821,8 @@ async function displaySession(projectId, sessionId) {
   target.view = sessionId;
   activePaneId = target.id;
   currentId = projectId;
+  // 文件/Git 面板展开时跟随新会话所在栏的项目
+  syncFileDrawerToPane(); syncGitDrawerToPane();
   renderPanes();
   renderList();
   updatePaneLogButtons();
@@ -1730,6 +1888,7 @@ function renderList() {
     const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
         <div class="term-new-row">
           <button title="文件目录浏览（切换到该项目目录）" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+          <button title="Git 管理（状态/提交/推送/历史）" onclick="event.stopPropagation(); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
           <button title="打开 cmd 命令行" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')">${CMD_LOGO}</button>
           <button title="新建 claude 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')">${CLAUDE_LOGO}</button>
           <button title="新建 codex 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')">${CODEX_LOGO}</button>
@@ -1751,18 +1910,11 @@ function renderList() {
       ? `<div class="meta">${pathCell}</div>`
       : `<div class="meta">${pathCell}<button class="status-btn ${running ? 'running' : 'stopped'}" title="查看日志" onclick="event.stopPropagation(); selectProject('${p.id}')"><span class="dot ${running ? 'running' : 'stopped'}"></span>${running ? 'PID ' + p.pid : '已停止'}</button></div>`;
     const actions = isFolder ? editBtn + delBtn : startBtn + stopBtn + restartBtn + cmdBtn + editBtn + delBtn;
-    // 头像节点始终渲染（折叠态显示、展开态 CSS display:none），取字规则见 projectIconText；
-    // 折叠态项目卡片加 title 显示完整项目名
-    // 折叠态小圆点：仅可启动类型（node/springboot）显示运行状态，folder 无启动/停止概念不显示
-    const dot = isFolder ? '' : `<span class="dot ${running ? 'running' : 'stopped'}"></span>`;
-    const avatar = `<div class="avatar" title="${escapeHtml(p.name)}" onclick="event.stopPropagation(); selectProject('${p.id}')" style="background:${AVATAR_COLORS[cls].bg};color:${AVATAR_COLORS[cls].fg}">${escapeHtml(projectIconText(p.name))}${dot}</div>`;
-    const cardTitle = document.getElementById('sidebar').classList.contains('collapsed') ? ` title="${escapeHtml(p.name)}"` : '';
-    // 折叠态：只保留一行名称 + 折叠按钮（变展开图标）
+    // 头像节点已随侧栏整体折叠移除；卡片折叠态：只保留一行名称 + 折叠按钮（变展开图标）
     const itemCollapsed = isProjectCollapsed(p.id);
     const collapseBtn = `<button class="collapse-item-btn" title="${itemCollapsed ? '展开' : '折叠'}" onclick="event.stopPropagation(); toggleProjectCollapsed('${p.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>`;
     return `
-      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''}" data-project-id="${p.id}"${cardTitle}>
-        ${avatar}
+      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''}" data-project-id="${p.id}">
         <div class="row">
           <span class="name">${escapeHtml(p.name)}</span>
           <span class="badge ${cls}">${typeLabel}</span>
@@ -2394,7 +2546,9 @@ async function deleteProject(id) {
   // 若终端激活栏因此空白，重置 currentId（标题栏随栏渲染，无需单独同步）
   const act = activePane();
   if (!act || !act.projectId) { currentId = null; }
-  // 文件抽屉正绑定该项目：清理持久化状态，回退空白占位
+  // 文件抽屉状态清理：删除项目的状态桶移除；正绑定该项目则回退空白占位
+  fileDrawerStateByProject.delete(id);
+  if (renderFileTree.cache) renderFileTree.cache.delete(id);
   if (fileDrawerProjectId === id) {
     fileDrawerProjectId = null;
     fileTreeExpanded = new Map();
@@ -2568,88 +2722,99 @@ async function loadProjects() {
   updatePaneLogButtons();
   // 项目就绪后再重连保存的会话视图：需要 projects 解析 + 服务端会话列表
   await reconnectSessionPanes();
-  // 文件抽屉：若持久化为展开态，恢复上次打开的项目 + 展开层级 + 选中态（与分栏解耦，不绑定激活栏）；
-  // 无历史状态则保持打开但显示空白占位（不弹 toast 干扰）
-  if (fileDrawerOpen) openFileDrawer();
+  // 文件面板：若当前激活，跟随激活栏项目打开（激活栏空白则回退前次项目，从没打开过则空白占位）
+  if (sideDrawerPanel === 'file') openFileDrawer();
 }
 
-// ---------- 侧栏拖拽调宽 + 折叠 ----------
-// 宽度/折叠态均持久化到 localStorage；折叠态宽度固定为图标列，与记忆的展开宽度互不影响。
-const SIDEBAR_MIN = 180, SIDEBAR_MAX = 480, SIDEBAR_COLLAPSED_W = 48;
-const AVATAR_COLORS = {
-  node:        { bg: '#e8f3ff', fg: '#165dff' },
-  springboot: { bg: '#fff3e8', fg: '#f77234' },
-  folder:     { bg: '#e8f7e8', fg: '#389e0d' },
-};
-let sidebarWidth = parseInt(localStorage.getItem('sidebarWidth'), 10) || 280;
-let sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === '1';
-let sidebarDragging = null;
-
-// 项目名 → 头像取字：首字符为中文显示该字；否则取前 2 个单词首字母（单个单词取前 2 字母）
-function projectIconText(name) {
-  if (!name) return '?';
-  const s = String(name).trim();
-  if (!s) return '?';
-  if (/[㐀-䶿一-鿿]/.test(s[0])) return s[0];
-  const words = s.split(/\s+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return (words[0] || '?').slice(0, 2).toUpperCase();
-}
-
-function toggleSidebar() {
-  setSidebarCollapsed(!sidebarCollapsed);
-}
-
-// 应用侧栏宽度/折叠态：折叠态用固定图标列宽，展开态恢复记忆宽度
-function applySidebarState() {
-  const sb = document.getElementById('sidebar');
-  sb.classList.toggle('collapsed', sidebarCollapsed);
-  sb.style.width = (sidebarCollapsed ? SIDEBAR_COLLAPSED_W : sidebarWidth) + 'px';
-  document.getElementById('collapseBtn').title = sidebarCollapsed ? '展开侧栏' : '折叠侧栏';
-}
-
-function setSidebarCollapsed(collapsed) {
-  sidebarCollapsed = collapsed;
-  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
-  applySidebarState();
-  renderList();   // 重渲染：折叠态只显示头像图标
-  scheduleFitAndResize(); // 侧栏宽度变化 → 右侧 console 变宽，重新 fit xterm + 同步 PTY
-}
+// ---------- 左侧固定抽屉：宽度拖拽 + 面板开关 ----------
+// 项目/文件/Git 三面板共用一个停靠容器，宽度统一拖拽调宽并持久化（sideDrawerWidth）；
+// 活动栏三按钮开关面板：点未激活按钮展开对应面板，再点激活按钮收起整个抽屉；
+// 固定参与 flex 布局（挤压终端区），点外部不收起，无整体折叠。
+const DRAWER_MIN = 180, DRAWER_MAX = 480;
+let drawerWidth = parseInt(localStorage.getItem('sideDrawerWidth'), 10) || 280;
+let drawerDragging = null;
 
 // 拖拽分隔条调宽：pointer capture 防止拖出丢失；结束写入 localStorage 并 fit。
-// 起点取 getComputedStyle 当前实际宽度（兜底 sidebarWidth），避免过渡动画中抓取跳变；
-// current 实时记录本次拖拽值，结束时写回 sidebarWidth（不依赖 offsetWidth 布局值）。
-(function initSidebarDrag() {
-  const sb = document.getElementById('sidebar');
-  const resizer = document.getElementById('sidebarResizer');
+// 起点取 getComputedStyle 当前实际宽度（兜底 drawerWidth），避免过渡动画中抓取跳变；
+// current 实时记录本次拖拽值，结束时写回 drawerWidth（不依赖 offsetWidth 布局值）。
+(function initDrawerDrag() {
+  const drawer = document.getElementById('sideDrawer');
+  const resizer = document.getElementById('sideDrawerResizer');
+  if (!drawer || !resizer) return;
   resizer.addEventListener('pointerdown', (e) => {
-    if (sidebarCollapsed) return; // 折叠态宽度固定，禁止拖拽
     e.preventDefault();
-    const startW = parseFloat(getComputedStyle(sb).width) || sidebarWidth;
-    sidebarDragging = { startX: e.clientX, startW, current: startW };
+    const startW = parseFloat(getComputedStyle(drawer).width) || drawerWidth;
+    drawerDragging = { startX: e.clientX, startW, current: startW };
     resizer.setPointerCapture(e.pointerId);
     resizer.classList.add('dragging');
-    sb.classList.add('dragging'); // 关闭 width 过渡，拖拽即时生效
+    drawer.classList.add('dragging'); // 关闭 width 过渡，拖拽即时生效
   });
   resizer.addEventListener('pointermove', (e) => {
-    if (!sidebarDragging) return;
-    const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarDragging.startW + (e.clientX - sidebarDragging.startX)));
-    sidebarDragging.current = w;
-    sb.style.width = w + 'px';
+    if (!drawerDragging) return;
+    const w = Math.min(DRAWER_MAX, Math.max(DRAWER_MIN, drawerDragging.startW + (e.clientX - drawerDragging.startX)));
+    drawerDragging.current = w;
+    drawer.style.width = w + 'px';
   });
   const endDrag = () => {
-    if (!sidebarDragging) return;
-    sidebarWidth = sidebarDragging.current;
-    sidebarDragging = null;
+    if (!drawerDragging) return;
+    drawerWidth = drawerDragging.current;
+    drawerDragging = null;
     resizer.classList.remove('dragging');
-    sb.classList.remove('dragging');
-    localStorage.setItem('sidebarWidth', String(sidebarWidth));
-    sb.style.width = sidebarWidth + 'px';
+    drawer.classList.remove('dragging');
+    localStorage.setItem('sideDrawerWidth', String(drawerWidth));
+    drawer.style.width = drawerWidth + 'px';
     scheduleFitAndResize();
   };
   resizer.addEventListener('pointerup', endDrag);
   resizer.addEventListener('pointercancel', endDrag);
 })();
+
+// ---------- 抽屉面板开关（项目/文件/Git 三选一） ----------
+// SIDE_DRAWER_PANEL: 'project' | 'file' | 'git'；null = 抽屉收起。
+// 持久化：面板选择存 sideDrawerPanel；三面板互斥显示，点未激活按钮切换面板，
+// 再点激活按钮收起整个抽屉；固定停靠，点外部不收起。
+const SIDE_DRAWER_PANEL_KEY = 'sideDrawerPanel';
+let sideDrawerPanel = null;
+// 恢复上次的面板选择（仅记忆面板，不自动展开抽屉——开态由各面板自身恢复逻辑决定）
+(function restoreSideDrawerPanel() {
+  const v = localStorage.getItem(SIDE_DRAWER_PANEL_KEY);
+  sideDrawerPanel = (v === 'project' || v === 'file' || v === 'git') ? v : null;
+})();
+function applySideDrawerState() {
+  const drawer = document.getElementById('sideDrawer');
+  const main = document.querySelector('.main');
+  if (!drawer || !main) return;
+  // 抽屉开态：有激活面板即展开；三面板互斥显示
+  const open = !!sideDrawerPanel;
+  drawer.classList.toggle('open', open);
+  main.classList.toggle('drawer-closed', !open);
+  document.getElementById('panelProject').style.display = sideDrawerPanel === 'project' ? 'flex' : 'none';
+  document.getElementById('panelFile').style.display = sideDrawerPanel === 'file' ? 'flex' : 'none';
+  document.getElementById('panelGit').style.display = sideDrawerPanel === 'git' ? 'flex' : 'none';
+  drawer.style.width = drawerWidth + 'px';
+  // 活动栏图标高亮跟随面板开态
+  const map = { project: 'activityProjectBtn', file: 'activityFileBtn', git: 'activityGitBtn' };
+  for (const [key, id] of Object.entries(map)) {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('active', sideDrawerPanel === key);
+  }
+  scheduleFitAndResize();
+}
+// 统一面板开关：切到目标面板（已激活则收起整个抽屉）
+function toggleSidePanel(panel) {
+  sideDrawerPanel = sideDrawerPanel === panel ? null : panel;
+  if (sideDrawerPanel) localStorage.setItem(SIDE_DRAWER_PANEL_KEY, sideDrawerPanel);
+  else localStorage.removeItem(SIDE_DRAWER_PANEL_KEY);
+  // 统一先应用开关态（展开/收起/面板互斥/高亮），再让文件/Git 面板各自加载数据
+  applySideDrawerState();
+  if (sideDrawerPanel === 'project') {
+    renderList();
+  } else if (sideDrawerPanel === 'file') {
+    openFileDrawer();
+  } else if (sideDrawerPanel === 'git') {
+    openGitDrawer();
+  }
+}
 
 // ---------- 日志抽屉折叠/调高 ----------
 // 折叠态 + 展开高度均持久化到 localStorage；默认收起。
@@ -2719,6 +2884,8 @@ document.addEventListener('mousedown', (e) => {
   const resizer = document.getElementById('logDrawerResizer');
   if (drawer && drawer.contains(e.target)) return;          // 点在抽屉内：不收起
   if (resizer && resizer.contains(e.target)) return;        // 点在调高条：不收起
+  if (e.target.closest('.modal-overlay')) return;           // 点在弹窗（确认框/设置等）：不收起
+  if (e.target.closest('.pane-context-menu, .file-context-menu')) return; // 点在自绘右键菜单：不收起
   closeLogDrawer();
 });
 // 抽屉调高拖拽：上拉/下拉改 --log-drawer-h（px），持久化；拖拽中关过渡即时生效。
@@ -2755,65 +2922,103 @@ document.addEventListener('mousedown', (e) => {
   resizer.addEventListener('pointercancel', endDrag);
 })();
 
-// ---------- 文件目录浏览抽屉（右侧） ----------
-// 与分栏窗口完全解耦：项目/展开层级/选中态均持久化，右上角按钮纯粹恢复上次状态，
-// 唯一切换项目目录的入口是侧栏项目卡片的文件夹按钮（openFileDrawer(projectId)）。
+// ---------- 文件目录浏览面板（左侧固定抽屉） ----------
+// 与分栏窗口完全解耦：项目/展开层级/选中态均持久化，活动栏/右上角按钮纯粹恢复上次状态，
+// 唯一切换项目目录的入口是项目卡片的文件夹按钮（openFileDrawer(projectId)）。
 // 树用扁平数据 + DOM 增量渲染：每个目录节点懒加载子层，展开态记录在 fileTreeExpanded
 //（Map: relativeSubPath -> true），重新打开时按已展开集合重新请求逐层还原。
-const FILE_DRAWER_OPEN_KEY = 'fileDrawerOpen';
-const FILE_DRAWER_WIDTH_KEY = 'fileDrawerWidth';
-// 抽屉完整状态持久化：项目 + 展开层级 + 选中态，与分栏窗口完全解耦。
-// 右上角按钮纯粹恢复上次状态；唯一切换项目目录的入口是侧栏项目卡片的文件夹按钮（openFileDrawer(projectId)）。
-const FILE_DRAWER_PROJECT_KEY = 'fileDrawerProject';
-const FILE_DRAWER_EXPANDED_KEY = 'fileDrawerExpanded';
-const FILE_DRAWER_SELECTED_KEY = 'fileDrawerSelected';
-let fileDrawerOpen = localStorage.getItem(FILE_DRAWER_OPEN_KEY) === '1';
-let fileDrawerWidth = parseInt(localStorage.getItem(FILE_DRAWER_WIDTH_KEY), 10) || 0;
+// 开关统一走 sideDrawerPanel（'file' 即开），本面板不再有独立的 open 态持久化键。
+const FILE_DRAWER_PROJECT_KEY = 'fileDrawerProject';      // 前一次查看的项目（激活栏空白时的回退）
+const FILE_DRAWER_STATE_KEY = 'fileDrawerState';          // 每项目独立状态桶：{ [projectId]: { expanded:[], selected } }
+let fileDrawerOpen = false;         // 派生态：sideDrawerPanel === 'file' 时为 true
 let fileDrawerProjectId = null;     // 当前抽屉绑定的项目 id
-let fileTreeExpanded = new Map();   // sub -> true（已展开目录）
+let fileTreeExpanded = new Map();   // sub -> true（已展开目录）——当前项目的视图
 let fileTreeSelected = null;        // 当前选中文件/目录的 sub
-// 启动时从 localStorage 还原上次的项目/展开/选中状态（openFileDrawer 时才真正加载树）
+// 每项目独立状态桶（内存）：切换项目时把当前状态存回桶里，再从新项目桶恢复——
+// 每个项目保留最后展开层级与选中态，切回来时原样还原。
+const fileDrawerStateByProject = new Map();
+// 启动时从 localStorage 还原：前次项目 + 各项目状态桶（openFileDrawer 时才真正加载树）
 (function restoreFileDrawerState() {
   fileDrawerProjectId = localStorage.getItem(FILE_DRAWER_PROJECT_KEY) || null;
+  // 旧版单份状态迁移：fileDrawerExpanded/fileDrawerSelected → 前次项目自己的状态桶
   try {
-    const arr = JSON.parse(localStorage.getItem(FILE_DRAWER_EXPANDED_KEY) || '[]');
-    if (Array.isArray(arr)) fileTreeExpanded = new Map(arr.map(s => [s, true]));
+    const legacyExp = JSON.parse(localStorage.getItem('fileDrawerExpanded') || 'null');
+    if (Array.isArray(legacyExp) && fileDrawerProjectId) {
+      fileDrawerStateByProject.set(fileDrawerProjectId, {
+        expanded: new Map(legacyExp.map(s => [s, true])),
+        selected: localStorage.getItem('fileDrawerSelected') || null,
+      });
+      localStorage.removeItem('fileDrawerExpanded');
+      localStorage.removeItem('fileDrawerSelected');
+    }
+  } catch (e) { /* 忽略迁移失败 */ }
+  try {
+    const obj = JSON.parse(localStorage.getItem(FILE_DRAWER_STATE_KEY) || '{}');
+    for (const [pid, st] of Object.entries(obj || {})) {
+      if (st && Array.isArray(st.expanded)) {
+        fileDrawerStateByProject.set(pid, { expanded: new Map(st.expanded.map(s => [s, true])), selected: st.selected || null });
+      }
+    }
   } catch (e) { /* 损坏则从空白开始 */ }
-  fileTreeSelected = localStorage.getItem(FILE_DRAWER_SELECTED_KEY) || null;
+  // 恢复前次项目的视图状态到内存
+  const restored = fileDrawerStateByProject.get(fileDrawerProjectId);
+  if (restored) { fileTreeExpanded = restored.expanded; fileTreeSelected = restored.selected; }
 })();
 function persistFileDrawerState() {
-  if (fileDrawerProjectId) localStorage.setItem(FILE_DRAWER_PROJECT_KEY, fileDrawerProjectId);
-  else localStorage.removeItem(FILE_DRAWER_PROJECT_KEY);
-  localStorage.setItem(FILE_DRAWER_EXPANDED_KEY, JSON.stringify([...fileTreeExpanded.keys()]));
-  if (fileTreeSelected) localStorage.setItem(FILE_DRAWER_SELECTED_KEY, fileTreeSelected);
-  else localStorage.removeItem(FILE_DRAWER_SELECTED_KEY);
+  // 状态桶落盘（含当前项目视图），加 lastProject 指针
+  if (fileDrawerProjectId) {
+    fileDrawerStateByProject.set(fileDrawerProjectId, { expanded: fileTreeExpanded, selected: fileTreeSelected });
+    localStorage.setItem(FILE_DRAWER_PROJECT_KEY, fileDrawerProjectId);
+  }
+  try {
+    const obj = {};
+    for (const [pid, st] of fileDrawerStateByProject) {
+      obj[pid] = { expanded: [...st.expanded.keys()], selected: st.selected };
+    }
+    localStorage.setItem(FILE_DRAWER_STATE_KEY, JSON.stringify(obj));
+  } catch (e) { /* 超限等忽略 */ }
+}
+// 切换文件面板绑定的项目：把当前视图状态存回旧项目桶，从新项目桶恢复（无则全新空状态）
+function switchFileDrawerProject(projectId) {
+  if (fileDrawerProjectId && fileDrawerProjectId !== projectId) {
+    fileDrawerStateByProject.set(fileDrawerProjectId, { expanded: fileTreeExpanded, selected: fileTreeSelected });
+  }
+  fileDrawerProjectId = projectId;
+  const bucket = projectId ? fileDrawerStateByProject.get(projectId) : null;
+  fileTreeExpanded = bucket ? bucket.expanded : new Map();
+  fileTreeSelected = bucket ? bucket.selected : null;
+  persistFileDrawerState();
+  // 项目切换后目录缓存不通用，清空（各项目树数据独立）
+  if (renderFileTree.cache) renderFileTree.cache = new Map();
 }
 const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
 const ICON_FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 const ICON_TWISTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
 function applyFileDrawerState() {
-  const c = document.querySelector('.console');
-  if (!c) return;
-  c.classList.toggle('file-drawer-open', fileDrawerOpen);
-  if (fileDrawerWidth > 0) c.style.setProperty('--file-drawer-w', fileDrawerWidth + 'px');
-  else c.style.removeProperty('--file-drawer-w');
-  scheduleFitAndResize();
+  // 开关/宽度/高亮统一由 applySideDrawerState 承担；此处仅同步派生态
+  fileDrawerOpen = sideDrawerPanel === 'file';
 }
 function openFileDrawer(projectId) {
-  // 无参调用（右上角按钮）：纯粹打开抽屉，恢复上次持久化的项目 + 展开层级 + 选中态；
-  // 从未打开过（无持久化状态）时显示空白占位。
-  // 带参调用（侧栏项目卡片文件夹按钮，唯一切换项目目录的入口）：重置树并加载该项目根。
+  // 无参调用（活动栏文件按钮）：跟随当前终端激活栏项目——
+  //   激活栏绑定了项目 → 打开该项目目录（恢复该项目自己的展开状态）；
+  //   空白栏/无项目 → 回退前一次查看的项目（fileDrawerProject 持久化指针）；
+  //   从没打开过 → 空白占位。
+  // 带参调用（项目卡片文件夹按钮/激活联动）：绑定该项目。
+  // 每个项目独立保留展开层级 + 选中态（fileDrawerStateByProject 状态桶）。
+  if (!projectId) {
+    const act = activePane();
+    if (act && act.projectId) projectId = act.projectId;
+  }
   if (projectId) {
     const incoming = projects.find(x => x.id === projectId);
     if (incoming && fileDrawerProjectId !== incoming.id) {
-      fileDrawerProjectId = incoming.id;
-      fileTreeExpanded = new Map();
-      fileTreeSelected = null;
+      switchFileDrawerProject(incoming.id);
     }
   }
-  fileDrawerOpen = true;
-  localStorage.setItem(FILE_DRAWER_OPEN_KEY, '1');
+  sideDrawerPanel = 'file';
+  localStorage.setItem(SIDE_DRAWER_PANEL_KEY, 'file');
+  applySideDrawerState();
   applyFileDrawerState();
   renderFileDrawerTitle();
   const proj = projects.find(x => x.id === fileDrawerProjectId);
@@ -2828,8 +3033,13 @@ function openFileDrawer(projectId) {
     renderFileBreadcrumb(null);
     return;
   }
-  // 还原展开层级：请求展开集合里缓存未命中的层（含根 ''，页面刷新后缓存为空时必须补拉根），
-  // 命中缓存直接渲染
+  // 还原展开层级（见 restoreFileTreeExpanded）
+  restoreFileTreeExpanded();
+}
+
+// 还原展开层级：请求展开集合里缓存未命中的层（含根 ''，页面刷新/切项目后缓存为空时必须补拉根），
+// 命中缓存直接渲染。打开面板与面板展开中切项目（syncFileDrawerToPane）共用。
+function restoreFileTreeExpanded() {
   if (!fileTreeExpanded.has('') ) { loadFileDir(''); return; }
   const cache = fileTreeCache();
   const missing = [...fileTreeExpanded.keys()].filter(sub => !(cache && cache.has(sub)));
@@ -2843,21 +3053,14 @@ function openFileDrawer(projectId) {
   }
 }
 function closeFileDrawer() {
-  fileDrawerOpen = false;
-  localStorage.setItem(FILE_DRAWER_OPEN_KEY, '0');
-  persistFileDrawerState();
+  // 抽屉固定停靠：仅当面板激活时收起整个抽屉（面板已切走则无需处理）
+  if (sideDrawerPanel !== 'file') { applyFileDrawerState(); return; }
+  sideDrawerPanel = null;
+  localStorage.removeItem(SIDE_DRAWER_PANEL_KEY);
+  applySideDrawerState();
   applyFileDrawerState();
+  persistFileDrawerState();
 }
-// 点击抽屉外任一处（终端区/侧栏/空白）自动收起文件抽屉。
-// mousedown 判定（先于 click）：打开按钮触发时抽屉尚未展开，监听器 early-return 不会误收起。
-document.addEventListener('mousedown', (e) => {
-  if (!fileDrawerOpen) return;
-  const drawer = document.getElementById('fileDrawer');
-  const resizer = document.getElementById('fileDrawerResizer');
-  if (drawer && drawer.contains(e.target)) return;     // 点在抽屉内：不收起
-  if (resizer && resizer.contains(e.target)) return;   // 点在调宽条：不收起
-  closeFileDrawer();
-});
 function toggleFileDrawer() {
   fileDrawerOpen ? closeFileDrawer() : openFileDrawer();
 }
@@ -2873,7 +3076,7 @@ function renderFileDrawerTitle() {
   if (refresh) refresh.disabled = !hasProj;
   if (explorer) explorer.disabled = !hasProj;
 }
-// 激活栏切换不再联动文件抽屉：抽屉与分栏窗口完全解耦，保持上次打开的项目目录不变。
+// 激活栏切换联动文件面板：见 activatePane / syncFileDrawerToPane（面板展开时跟随激活栏项目）。
 
 // 请求某子目录一层条目。toCache=true 时只写缓存不渲染（用于还原展开态时批量补拉），
 // sub = '' 表示项目根。
@@ -3006,7 +3209,7 @@ async function loadFileDirIntoCache(sub, silent) {
   }
 }
 function refreshFileDrawer() {
-  // 清空缓存与展开态，重新加载根
+  // 清空缓存与当前项目展开态，重新加载根（只重置当前项目，不影响其他项目的记忆状态）
   if (renderFileTree.cache) renderFileTree.cache = new Map();
   fileTreeExpanded = new Map();
   fileTreeSelected = null;
@@ -3047,45 +3250,591 @@ function execFileContextAction(act) {
     openExplorer(fileDrawerProjectId, targetSub);
   }
 }
-// 抽屉调宽拖拽：左/右拖改 --file-drawer-w（px），持久化
-(function initFileDrawerDrag() {
-  const drawer = document.getElementById('fileDrawer');
-  const resizer = document.getElementById('fileDrawerResizer');
-  if (!drawer || !resizer) return;
-  let drag = null;
-  resizer.addEventListener('pointerdown', (e) => {
-    if (!fileDrawerOpen) return;
-    e.preventDefault();
-    const w = parseFloat(getComputedStyle(drawer).width) || 280;
-    drag = { startX: e.clientX, startW: w, current: w };
-    resizer.setPointerCapture(e.pointerId);
-    resizer.classList.add('dragging');
-    drawer.classList.add('dragging');
-  });
-  resizer.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    // 左拖（clientX 减小）→ 抽屉变宽
-    const w = Math.max(180, Math.min(window.innerWidth - 240, drag.startW - (e.clientX - drag.startX)));
-    drag.current = w;
-    document.querySelector('.console').style.setProperty('--file-drawer-w', w + 'px');
-  });
-  const endDrag = () => {
-    if (!drag) return;
-    fileDrawerWidth = Math.round(drag.current);
-    localStorage.setItem(FILE_DRAWER_WIDTH_KEY, String(fileDrawerWidth));
-    drag = null;
-    resizer.classList.remove('dragging');
-    drawer.classList.remove('dragging');
-    scheduleFitAndResize();
+// 抽屉调宽统一走左侧 .side-drawer 容器拖拽条（initDrawerDrag），面板内不再单独调宽
+
+// ---------- Git 面板（左侧固定抽屉，与文件面板同构互斥） ----------
+// 分支区 + staged/unstaged 变更区 + 提交区 + 历史区。
+// 状态不持久化（每次打开重新拉 status），唯一切换项目的入口是项目卡片的 Git 按钮。
+// 开关统一走 sideDrawerPanel（'git' 即开），本面板不再有独立的 open 态。
+const GIT_DRAWER_PROJECT_KEY = 'gitDrawerProject';
+let gitDrawerOpen = false;          // 派生态：sideDrawerPanel === 'git' 时为 true
+let gitDrawerProjectId = null;
+// 当前抽屉数据：{ branch, files:[{x,y,file}], ahead, behind }
+let gitStatus = null;
+let gitLogCache = [];
+let gitBranchesCache = [];   // 本地分支列表（切换下拉用，打开抽屉时拉一次）
+// 勾选说明：勾选框状态直接从 gitStatus 派生（staged 区 checked、unstaged 区不勾），
+// 无前端勾选集合——重开抽屉/刷新自然恢复正确勾选。
+
+const ICON_GIT_BRANCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>';
+
+function applyGitDrawerState() {
+  // 开关/宽度/高亮统一由 applySideDrawerState 承担；此处仅同步派生态
+  gitDrawerOpen = sideDrawerPanel === 'git';
+}
+function openGitDrawer(projectId) {
+  // 带参（项目卡片 Git 按钮）：绑定该项目；无参（活动栏）：跟随当前终端激活栏项目
+  //（空白栏/无项目时回退上次持久化的项目）
+  if (!projectId) {
+    const act = activePane();
+    if (act && act.projectId) projectId = act.projectId;
+  }
+  if (projectId) {
+    gitDrawerProjectId = projectId;
+    localStorage.setItem(GIT_DRAWER_PROJECT_KEY, projectId);
+  } else if (!gitDrawerProjectId) {
+    gitDrawerProjectId = localStorage.getItem(GIT_DRAWER_PROJECT_KEY) || null;
+  }
+  // 绑定项目已删：回退空白
+  if (gitDrawerProjectId && !projects.find(x => x.id === gitDrawerProjectId)) {
+    gitDrawerProjectId = null;
+    localStorage.removeItem(GIT_DRAWER_PROJECT_KEY);
+  }
+  sideDrawerPanel = 'git';
+  localStorage.setItem(SIDE_DRAWER_PANEL_KEY, 'git');
+  applySideDrawerState();
+  applyGitDrawerState();
+  renderGitDrawerTitle();
+  if (gitDrawerProjectId) {
+    loadGitStatus();
+    // 打开面板自动 fetch（1 分钟节流）：ahead/behind 徽标基于本地远端指针，
+    // fetch 后才反映远端真实状态；失败静默不影响面板打开速度
+    gitFetchThrottled();
+  }
+}
+function closeGitDrawer() {
+  // 抽屉固定停靠：仅当面板激活时收起整个抽屉（面板已切走则无需处理）
+  if (sideDrawerPanel !== 'git') { applyGitDrawerState(); return; }
+  sideDrawerPanel = null;
+  localStorage.removeItem(SIDE_DRAWER_PANEL_KEY);
+  applySideDrawerState();
+  applyGitDrawerState();
+}
+// 活动栏 Git 按钮：开则关，关则开（恢复上次项目）
+function toggleGitDrawer() {
+  gitDrawerOpen ? closeGitDrawer() : openGitDrawer();
+}
+function renderGitDrawerTitle() {
+  const el = document.getElementById('gitDrawerTitle');
+  if (!el) return;
+  const proj = projects.find(x => x.id === gitDrawerProjectId);
+  el.textContent = proj ? `Git · ${proj.name}` : 'Git';
+}
+function refreshGitDrawer() {
+  loadGitStatus();
+  gitLogCache = [];
+  renderGitLog();
+  loadGitLog();
+  // 手动刷新时顺带 fetch（更新 ahead/behind 徽标），受 1 分钟节流约束
+  gitFetchThrottled();
+}
+// ---------- fetch 节流 ----------
+// git fetch 联网更新远端指针，ahead/behind 徽标据此变准。触发点：
+//   1) 打开抽屉（openGitDrawer）——自动 fetch，让徽标尽量新鲜
+//   2) 点刷新按钮——用户主动刷新
+// 限制：1 分钟内最多发一次（按项目区分），避免每次开抽屉都联网等半天。
+const GIT_FETCH_THROTTLE_MS = 60 * 1000;
+const gitFetchLastAt = new Map();   // projectId -> 上次 fetch 时间戳
+let gitFetchInFlight = false;
+function gitFetchThrottled(force) {
+  const pid = gitDrawerProjectId;
+  if (!pid) return;
+  const last = gitFetchLastAt.get(pid) || 0;
+  if (!force && Date.now() - last < GIT_FETCH_THROTTLE_MS) return;
+  if (gitFetchInFlight) return;
+  gitFetchInFlight = true;
+  gitFetchLastAt.set(pid, Date.now());
+  // 静默执行：失败（离线/无远端）不打扰，成功后只更新徽标，不重渲染抽屉
+  gitFetch('fetch', { method: 'POST' })
+    .then((data) => { if (data.ok && gitDrawerOpen) updateGitAheadBehind(); })
+    .catch(() => {})
+    .finally(() => { gitFetchInFlight = false; });
+}
+// fetch 完成后只更新「拉取/推送」按钮的 ahead/behind 徽标：
+// 重拉 status 但不做整段 renderGitBody，避免清空 body 导致闪烁、滚动位置丢失
+async function updateGitAheadBehind() {
+  try {
+    const data = await gitFetch('status');
+    if (!data.ok || !gitDrawerOpen) return;
+    if (gitStatus) { gitStatus.ahead = data.ahead; gitStatus.behind = data.behind; }
+    const row = document.querySelector('#gitDrawerBody .git-net-row');
+    if (!row) return;
+    const abBadge = (n, cls, label) => n == null ? '' :
+      `<span class="git-ab ${cls}" title="${label}">${n}</span>`;
+    const pull = row.querySelector('[data-net="pull"]');
+    const push = row.querySelector('[data-net="push"]');
+    if (pull) pull.innerHTML = `拉取${abBadge(data.behind, 'behind', '远端领先 ' + data.behind + ' 个提交')}`;
+    if (push) push.innerHTML = `推送${abBadge(data.ahead, 'ahead', '本地领先 ' + data.ahead + ' 个提交')}`;
+  } catch (e) { /* 静默：fetch 成功但 status 偶发失败时保持旧徽标 */ }
+}
+async function gitFetch(route, opts) {
+  const proj = projects.find(x => x.id === gitDrawerProjectId);
+  if (!proj) throw new Error('未选择项目');
+  const resp = await fetch(`/api/projects/${proj.id}/git/${route}`, opts);
+  const data = await resp.json();
+  return data;
+}
+// 拉取 status 并整段重渲染抽屉 body
+async function loadGitStatus() {
+  const body = document.getElementById('gitDrawerBody');
+  if (!body) return;
+  body.innerHTML = '<div class="git-loading">加载中…</div>';
+  let data;
+  try {
+    data = await gitFetch('status');
+  } catch (e) {
+    body.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (data.notRepo) {
+    body.innerHTML = '<div class="git-not-repo">该目录不是 git 仓库</div>';
+    renderGitDrawerTitle();
+    return;
+  }
+  if (!data.ok) {
+    body.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'git status 失败')}</div>`;
+    return;
+  }
+  gitStatus = data;
+  renderGitDrawerTitle();
+  renderGitBody();
+  // 状态区渲染后异步补拉分支列表与历史（不阻塞主区）
+  loadGitBranches();
+  gitLogCache = [];
+  renderGitLog();
+  loadGitLog();
+}
+async function loadGitBranches() {
+  try {
+    const data = await gitFetch('branches');
+    gitBranchesCache = data.ok ? (data.branches || []) : [];
+  } catch (e) {
+    gitBranchesCache = [];
+  }
+  // 分支下拉就位后重渲染（保留勾选）
+  if (gitStatus && gitDrawerOpen) renderGitBody();
+}
+// status.files 按 porcelain XY 展开：每个文件最多出现两条（staged X / unstaged Y）。
+// x='?'（未跟踪）单独归入 untracked 组（"未加入版本控制"），与普通修改区分展示。
+function splitGitFiles(files) {
+  const staged = [];
+  const unstaged = [];
+  const untracked = [];
+  for (const f of files) {
+    if (f.x === '?') {
+      untracked.push({ file: f.file, st: '?' });
+      continue;
+    }
+    if (f.x && f.x !== ' ') staged.push({ file: f.file, st: f.x === 'A' ? 'A' : f.x === 'D' ? 'D' : f.x === 'R' ? 'R' : 'M' });
+    if (f.y && f.y !== ' ') unstaged.push({ file: f.file, st: f.y === 'D' ? 'D' : f.y === 'T' ? 'M' : 'M' });
+  }
+  return { staged, unstaged, untracked };
+}
+function gitStBadge(st) {
+  const label = st === 'Q' ? '?' : st;
+  return `<span class="st ${st}">${label}</span>`;
+}
+// 带全选勾选框的分组标题：勾选框在最前面，与文件行勾选框纵向对齐。
+// 勾上 = 整组一次 git add；取消勾 = 整组撤销暂存。
+// staged 组的条目本身就全是勾上的，组勾选框与之对应默认勾选；其余组默认不勾。
+function gitSectionTitleWithAll(label, count, group) {
+  const checked = group === 'staged' ? 'checked' : '';
+  const title = group === 'staged'
+    ? '整组已暂存；取消勾选撤销整组暂存'
+    : '勾选暂存整组；取消勾选撤销整组暂存';
+  return `<div class="git-section-title">
+    <input type="checkbox" ${checked} onchange="gitStageAll('${group}', this.checked)" title="${title}">
+    ${label} <span class="cnt">${count}</span>
+  </div>`;
+}
+// 整组勾选/取消：staged 组默认全勾上（取消勾=整组撤销暂存）；
+// unstaged/untracked 组默认不勾（勾上=整组一次 git add）
+async function gitStageAll(group, checked) {
+  if (!gitStatus) return;
+  const { staged, unstaged, untracked } = splitGitFiles(gitStatus.files);
+  const map = { staged, unstaged, untracked };
+  const targets = (map[group] || []).map(f => f.file);
+  if (!targets.length) return;
+  await gitStageFiles(targets, group === 'staged' ? true : !checked, true);
+}
+function renderGitBody() {
+  const body = document.getElementById('gitDrawerBody');
+  if (!body || !gitStatus) return;
+  const { branch, files, ahead, behind } = gitStatus;
+  const { staged, unstaged, untracked } = splitGitFiles(files);
+  const proj = projects.find(x => x.id === gitDrawerProjectId);
+  const branchOptions = gitBranchesCache.map(b =>
+    `<option value="${escapeHtml(b)}" ${b === branch ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('');
+  // ahead/behind 徽标：有 upstream 差异时显示数字（无差异/无 upstream 不显示）
+  const abBadge = (n, cls, label) => n == null ? '' :
+    `<span class="git-ab ${cls}" title="${label}">${n}</span>`;
+  // 文件行：文件名 - 相对路径（淡色）。根目录文件没有相对路径部分，只显示文件名。
+  // 目录型未跟踪条目（git 对整个未跟踪目录只报 "dir/" 一条）整体作为名字显示，
+  // 不拆分——否则 lastIndexOf('/') 会切出空文件名 + 悬空路径。
+  const fileCell = (file) => {
+    if (file.endsWith('/')) {
+      return `<span class="fname" title="${escapeHtml(file)}（目录，勾选将整个暂存）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(file)}</span>`;
+    }
+    const slash = file.lastIndexOf('/');
+    const name = slash >= 0 ? file.slice(slash + 1) : file;
+    const dir = slash >= 0 ? file.slice(0, slash) : '';
+    return `<span class="fname" title="${escapeHtml(file)}（点击查看 diff）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(name)}${dir ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(dir)}</span>` : ''}</span>`;
   };
-  resizer.addEventListener('pointerup', endDrag);
-  resizer.addEventListener('pointercancel', endDrag);
-})();
+  const parts = [];
+  // 分支区：分支名 + 下拉切换 + 刷新（刷新含 fetch，受 1 分钟节流）
+  parts.push(`<div class="git-branch-row">
+    <span class="git-branch-name" title="当前分支">${ICON_GIT_BRANCH}${escapeHtml(branch || 'HEAD detached')}</span>
+    ${branchOptions ? `<select title="切换分支" onchange="onGitBranchChange(this.value)">${branchOptions}</select>` : ''}
+    <button class="pane-btn" title="刷新状态（含 fetch：联网更新远端指针后刷新领先/落后数字，1 分钟内只真正 fetch 一次）" onclick="refreshGitDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+  </div>`);
+  // push / pull 行：中文按钮 + 领先/落后徽标（ahead→待推送，behind→待拉取）
+  parts.push(`<div class="git-net-row">
+    <button data-net="pull" onclick="gitPull()">拉取${abBadge(behind, 'behind', '远端领先 ' + behind + ' 个提交') || ''}</button>
+    <button data-net="push" onclick="gitPush()">推送${abBadge(ahead, 'ahead', '本地领先 ' + ahead + ' 个提交') || ''}</button>
+  </div>`);
+  if (!files.length) {
+    parts.push('<div class="git-empty">工作区干净，没有变更</div>');
+  } else {
+    // staged 区：勾选框状态 = git 真实暂存状态（已暂存默认勾上，取消勾选即 unstage）；组标题带「全选」
+    if (staged.length) {
+      parts.push(gitSectionTitleWithAll('已暂存', staged.length, 'staged'));
+      parts.push(staged.map(f => `
+        <div class="git-file-row">
+          <input type="checkbox" checked onchange="onGitStagedCheck('${escapeJs(f.file)}', this.checked)" title="已暂存；取消勾选则撤销暂存">
+          ${gitStBadge(f.st)}
+          ${fileCell(f.file)}
+        </div>`).join(''));
+    }
+    // unstaged 区：未暂存默认不勾，勾选即 git add；组标题带「全选」
+    if (unstaged.length) {
+      parts.push(gitSectionTitleWithAll('未暂存的修改', unstaged.length, 'unstaged'));
+      parts.push(unstaged.map(f => `
+        <div class="git-file-row">
+          <input type="checkbox" onchange="onGitUnstagedCheck('${escapeJs(f.file)}', this.checked)" title="勾选暂存此文件">
+          ${gitStBadge(f.st)}
+          ${fileCell(f.file)}
+        </div>`).join(''));
+    }
+    // untracked 区：未加入版本控制的文件（勾选即 git add）；组标题带「全选」
+    if (untracked.length) {
+      parts.push(gitSectionTitleWithAll('未加入版本控制', untracked.length, 'untracked'));
+      parts.push(untracked.map(f => `
+        <div class="git-file-row">
+          <input type="checkbox" onchange="onGitUntrackedCheck('${escapeJs(f.file)}', this.checked)" title="勾选加入版本控制（暂存）">
+          ${gitStBadge(f.st)}
+          ${fileCell(f.file)}
+        </div>`).join(''));
+    }
+    // 提交区：提交 / 提交并推送 两个按钮
+    parts.push(`<div class="git-commit-area">
+      <textarea id="gitCommitMsg" placeholder="提交说明（必填）" rows="2"></textarea>
+      <div class="git-commit-btns">
+        <button class="git-commit-btn" onclick="gitCommit(false)">提交</button>
+        <button class="git-commit-btn secondary" onclick="gitCommit(true)">提交并推送</button>
+      </div>
+    </div>`);
+  }
+  parts.push('<div class="git-section-title" style="margin-top:14px">提交历史</div><div id="gitLogList"><div class="git-loading">加载中…</div></div>');
+  body.innerHTML = parts.join('');
+}
+function escapeJs(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+// 勾选即操作，勾选状态 = git 暂存状态（staged 区默认勾上，unstaged/untracked 区默认不勾）。
+// 勾选/取消立即执行 git add / git reset，随后刷新 status 重渲染——勾选框永远反映真实状态，
+// 不存在前端自行维护的"勾选记忆"，重开抽屉自然恢复正确勾选。
+async function onGitUnstagedCheck(file, checked) {
+  if (!checked) { await loadGitStatus(); return; }  // 未暂存文件不可能"取消勾选"（本就不勾），防御性刷新
+  await gitStageFiles([file], false, true);
+}
+async function onGitUntrackedCheck(file, checked) {
+  // 未跟踪文件勾选 = git add（加入版本控制）；取消勾选后文件回到未跟踪态（git 不支持 add 的逆操作）
+  if (!checked) { await loadGitStatus(); return; }
+  await gitStageFiles([file], false, true);
+}
+async function onGitStagedCheck(file, checked) {
+  // 已暂存文件取消勾选 = 撤销暂存
+  if (checked) { await loadGitStatus(); return; }   // 已暂存文件不可能再"勾选"，防御性刷新
+  await gitStageFiles([file], true, true);
+}
+async function gitStageFiles(files, unstage, refresh) {
+  // 勾选是高频小操作：成功不打扰（列表即时刷新已是最直观反馈），失败才提示
+  try {
+    const data = await gitFetch('stage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files, unstage }),
+    });
+    if (!data.ok) { showToast('操作失败', 'error'); }
+    if (refresh) await loadGitStatus();
+  } catch (e) {
+    showToast('操作失败', 'error');
+  }
+}
+async function onGitBranchChange(branch) {
+  try {
+    const data = await gitFetch('checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    });
+    if (!data.ok) { showToast(data.msg || '切换分支失败', 'error'); }
+    else { showToast(`已切换到 ${branch}`, 'info'); gitLogCache = []; }
+    await loadGitStatus();
+  } catch (e) {
+    showToast('切换分支失败: ' + e.message, 'error');
+  }
+}
+async function gitPush() {
+  await gitNetwork('push', '推送');
+}
+async function gitPull() {
+  await gitNetwork('pull', '拉取');
+}
+async function gitNetwork(route, label) {
+  const btn = document.querySelector(`.git-net-row button[data-net="${route}"]`);
+  if (btn) btn.disabled = true;
+  try {
+    const data = await gitFetch(route, { method: 'POST' });
+    if (!data.ok) showToast(`${label}失败`, 'error');
+    else showToast(`${label}成功`, 'info');
+    await loadGitStatus();
+  } catch (e) {
+    showToast(`${label}失败: ` + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+// 提交（andPush=true 时提交后接着推送）：推送失败不影响"已提交"的既成事实，分别提示
+async function gitCommit(andPush) {
+  const ta = document.getElementById('gitCommitMsg');
+  const message = ta ? ta.value.trim() : '';
+  if (!message) { showToast('提交说明不能为空', 'warning'); return; }
+  try {
+    const data = await gitFetch('commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    if (!data.ok) { showToast('提交失败', 'error'); return; }
+    if (!andPush) { showToast('已提交', 'info'); }
+    gitLogCache = [];
+    await loadGitStatus();
+    if (andPush) await gitNetwork('push', '推送');
+  } catch (e) {
+    showToast('提交失败', 'error');
+  }
+}
+// 提交历史：拉一次缓存渲染
+async function loadGitLog() {
+  const el = document.getElementById('gitLogList');
+  if (!el) return;
+  let data;
+  try {
+    data = await gitFetch('log?limit=30');
+  } catch (e) {
+    el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (!data.ok) { el.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'git log 失败')}</div>`; return; }
+  gitLogCache = data.commits;
+  renderGitLog();
+}
+// 历史条目展开状态：hash -> true（点条目切换，展开才显示该提交的文件列表）
+const gitLogExpanded = new Set();
+function toggleGitLogExpand(hash) {
+  gitLogExpanded.has(hash) ? gitLogExpanded.delete(hash) : gitLogExpanded.add(hash);
+  renderGitLog();
+}
+// 看某次提交中单个文件的 diff：<hash>^ 与 <hash> 对该文件的对比
+async function showGitCommitFileDiff(hash, file) {
+  await showGitDiffModal(`commit=${encodeURIComponent(hash)}&file=${encodeURIComponent(file)}`, `${file} · ${hash}`);
+}
+function renderGitLog() {
+  const el = document.getElementById('gitLogList');
+  if (!el) return;
+  if (!gitLogCache.length) { el.innerHTML = '<div class="git-empty">暂无提交</div>'; return; }
+  el.innerHTML = gitLogCache.map(c => {
+    // 未推送的提交可右键软撤回（后端再校验是否最新一条，前端只做入口过滤）
+    const ctx = c.pushed === false
+      ? ` oncontextmenu="event.preventDefault(); showGitContextMenu(event, '${escapeHtml(c.hash)}')"` : '';
+    // 点提交条目展开/收起变更文件列表；点文件名才弹该文件的 diff
+    const expanded = gitLogExpanded.has(c.hash);
+    const filesHtml = expanded ? `
+      <div class="git-log-files">
+        ${c.files && c.files.length
+          ? c.files.map(f => `
+            <div class="git-log-file" onclick="event.stopPropagation(); showGitCommitFileDiff('${escapeHtml(c.hash)}', '${escapeJs(f)}')" title="${escapeHtml(f)}（点击查看 diff）">
+              <span class="git-log-file-name">${escapeHtml(f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f)}</span>${f.includes('/') ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(f.slice(0, f.lastIndexOf('/')))}</span>` : ''}
+            </div>`).join('')
+          : '<div class="git-log-file-empty">无文件变更</div>'}
+      </div>` : '';
+    return `
+    <div class="git-log-item">
+      <div class="git-log-row ${expanded ? 'expanded' : ''}" data-hash="${escapeHtml(c.hash)}" onclick="toggleGitLogExpand('${escapeHtml(c.hash)}')"${ctx}>
+        <div class="subj" title="${escapeHtml(c.subject)}">${escapeHtml(c.subject)}</div>
+        <div class="meta">
+          <span class="hash">${escapeHtml(c.hash)}</span>
+          <span>${escapeHtml(c.author)}</span>
+          <span>${gitRelTime(c.at)}</span>
+          ${c.pushed === false ? '<span class="git-push-badge" title="尚未推送到远端">未推送</span>' : ''}
+          ${c.files && c.files.length ? `<span class="cnt">${c.files.length}</span>` : ''}
+        </div>
+      </div>
+      ${filesHtml}
+    </div>`;
+  }).join('');
+}
+// Git 历史右键菜单：记录目标提交 hash，菜单项点击时执行软撤回
+function showGitContextMenu(event, hash) {
+  const menu = document.getElementById('gitContextMenu');
+  menu.dataset.hash = hash;
+  const x = Math.min(event.clientX, window.innerWidth - 180);
+  const y = Math.min(event.clientY, window.innerHeight - 50);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+}
+function hideGitContextMenu() {
+  document.getElementById('gitContextMenu').classList.remove('show');
+}
+async function execGitContextAction(act) {
+  const menu = document.getElementById('gitContextMenu');
+  const hash = menu.dataset.hash || '';
+  hideGitContextMenu();
+  if (act !== 'undo' || !hash) return;
+  // 二次确认：软撤回不丢改动，但会改写本地历史，明确告知后果
+  const ok = await showConfirm(`确认撤回提交 ${hash}？\n该提交的改动将全部回到「已暂存」区，文件内容不会丢失。`, '撤回提交');
+  if (!ok) return;
+  try {
+    const data = await gitFetch('undo-commit', { method: 'POST' });
+    if (!data.ok) { showToast('撤回失败', 'error'); return; }
+    showToast('已撤回', 'info');
+    gitLogCache = [];
+    await loadGitStatus();
+  } catch (e) {
+    showToast('撤回失败: ' + e.message, 'error');
+  }
+}
+function gitRelTime(at) {
+  const diff = Date.now() / 1000 - at;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+  if (diff < 86400 * 30) return Math.floor(diff / 86400) + ' 天前';
+  const d = new Date(at * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// diff 解析为左右两栏行：把 unified diff 的 hunk 按行对齐展开——
+// ' ' 上下文行左右各一行；'-' 只进左栏（旧），'+' 只进右栏（新）；
+// 同一 hunk 内删除块与新增块按顺序配对排布，使相邻的删/增行横向对应。
+// 返回 { left: [{t, s}], right: [{t, s}] }，t ∈ ctx|add|del|hunk，s 为显示文本。
+function parseSideBySide(diff) {
+  const left = [];
+  const right = [];
+  const lines = diff.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('diff ') || line.startsWith('index ')) { i++; continue; }
+    if (line.startsWith('---') || line.startsWith('+++')) { i++; continue; }
+    if (line.startsWith('@@')) {
+      left.push({ t: 'hunk', s: line });
+      right.push({ t: 'hunk', s: line });
+      i++;
+      continue;
+    }
+    if (line.startsWith('-')) {
+      // 收集连续删除块，随后若有等长或更长的连续新增块，则按序配对；多出的新增行只在右栏
+      const dels = [];
+      while (i < lines.length && lines[i].startsWith('-')) { dels.push(lines[i].slice(1)); i++; }
+      const adds = [];
+      while (i < lines.length && lines[i].startsWith('+')) { adds.push(lines[i].slice(1)); i++; }
+      const n = Math.max(dels.length, adds.length);
+      for (let k = 0; k < n; k++) {
+        left.push(k < dels.length ? { t: 'del', s: dels[k] } : { t: 'pad', s: '' });
+        right.push(k < adds.length ? { t: 'add', s: adds[k] } : { t: 'pad', s: '' });
+      }
+      continue;
+    }
+    if (line.startsWith('+')) {
+      // 无前置删除块的独立新增行
+      right.push({ t: 'add', s: line.slice(1) });
+      left.push({ t: 'pad', s: '' });
+      i++;
+      continue;
+    }
+    if (line.startsWith('\\')) { i++; continue; } // "\ No newline at end of file"
+    // 上下文行（' ' 或空）
+    left.push({ t: 'ctx', s: line.startsWith(' ') ? line.slice(1) : line });
+    right.push({ t: 'ctx', s: line.startsWith(' ') ? line.slice(1) : line });
+    i++;
+  }
+  return { left, right };
+}
+function sideColHtml(rows) {
+  if (!rows.length) return '<span class="diff-ctx">（无内容）</span>';
+  return rows.map(r => {
+    const esc = escapeHtml(r.s) || '&nbsp;';
+    if (r.t === 'pad') return `<span class="dl diff-pad">&nbsp;</span>`;
+    const cls = r.t === 'ctx' ? 'diff-ctx' : 'diff-' + r.t;
+    return `<span class="dl ${cls}">${esc}</span>`;
+  }).join('');
+}
+async function showGitDiff(file) {
+  await showGitDiffModal(`file=${encodeURIComponent(file)}`, file);
+}
+async function showGitCommitDiff(hash) {
+  await showGitDiffModal(`commit=${encodeURIComponent(hash)}`, `提交 ${hash}`);
+}
+async function showGitDiffModal(query, title) {
+  // 左右对比模态框：左旧右新，双栏同步滚动
+  document.getElementById('gitDiffTitle').textContent = title;
+  document.getElementById('gitDiffLoading').style.display = '';
+  document.getElementById('gitDiffLoading').textContent = '加载中…';
+  document.getElementById('gitDiffCols').style.display = 'none';
+  document.getElementById('gitDiffOverlay').classList.add('show');
+  try {
+    const data = await gitFetch('diff?' + query);
+    const loading = document.getElementById('gitDiffLoading');
+    if (!data.ok) {
+      loading.style.display = '';
+      loading.textContent = data.msg || 'git diff 失败';
+      return;
+    }
+    if (!data.diff) {
+      loading.style.display = '';
+      loading.textContent = '（无差异）';
+      return;
+    }
+    const { left, right } = parseSideBySide(data.diff);
+    document.getElementById('gitDiffLeft').innerHTML = sideColHtml(left);
+    document.getElementById('gitDiffRight').innerHTML = sideColHtml(right);
+    loading.style.display = 'none';
+    const cols = document.getElementById('gitDiffCols');
+    cols.style.display = 'flex';
+    // 双栏同步滚动：左栏滚动带动右栏（反之亦然），指针防抖环
+    const l = document.getElementById('gitDiffLeft');
+    const r = document.getElementById('gitDiffRight');
+    let syncing = false;
+    l.onscroll = () => { if (syncing) return; syncing = true; r.scrollTop = l.scrollTop; r.scrollLeft = l.scrollLeft; syncing = false; };
+    r.onscroll = () => { if (syncing) return; syncing = true; l.scrollTop = r.scrollTop; l.scrollLeft = r.scrollLeft; syncing = false; };
+  } catch (e) {
+    const loading = document.getElementById('gitDiffLoading');
+    loading.style.display = '';
+    loading.textContent = '加载失败: ' + e.message;
+  }
+}
+function closeGitDiffModal() {
+  document.getElementById('gitDiffOverlay').classList.remove('show');
+}
 
 // 启动即应用已保存的字体设置（localStorage，默认 Cascadia Code 13px）
 applyTermSettings();
-applySidebarState();
-applyFileDrawerState(); // 应用文件抽屉折叠态/宽度（默认收起）
+// 左侧抽屉：还原上次面板选择；文件面板持久化为开态时恢复上次项目 + 展开层级 + 选中态
+applySideDrawerState();
+if (sideDrawerPanel === 'file') openFileDrawer();
+else if (sideDrawerPanel === 'git') openGitDrawer();
 // 初始分栏：优先恢复持久化的布局（栏数 + 每栏项目视图 + 激活栏），无则单栏空白。
 // 会话视图在 loadProjects 内经 reconnectSessionPanes 按服务端存活状态重连或回退空白。
 restorePaneLayout();
@@ -3127,6 +3876,24 @@ loadProjects();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideFileContextMenu(); });
   window.addEventListener('blur', hideFileContextMenu);
 })();
+
+// Git 历史右键菜单：同文件树菜单模式（mousedown 执行 + 点别处/ESC/失焦关闭）
+(function () {
+  const menu = document.getElementById('gitContextMenu');
+  menu.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); execGitContextAction(b.dataset.act); });
+  });
+  document.addEventListener('click', hideGitContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('.git-context-menu') && !e.target.closest('.git-log-row')) hideGitContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideGitContextMenu(); });
+  window.addEventListener('blur', hideGitContextMenu);
+})();
+
+// 全局拦截浏览器原生右键菜单：页面所有右键交互走自绘菜单（分栏 tab/文件树/Git 历史），
+// 其余区域右键不应弹出浏览器默认菜单（WebView2 下显示浏览器 chrome 菜单，与面板风格不符）
+document.addEventListener('contextmenu', (e) => e.preventDefault());
 </script>
 </body>
 </html>

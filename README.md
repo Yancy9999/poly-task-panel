@@ -2,7 +2,7 @@
 
 > Windows 本地的多元任务面板：用 Web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树，并内置 Claude Code / Codex / pi 交互式终端。
 
-版本：**1.5.2**
+版本：**1.7.0**
 
 ---
 
@@ -35,9 +35,10 @@
 - **内置终端会话**：基于真 PTY（`node-pty`）+ `xterm.js`，在项目目录里开交互式终端：
   - **Claude Code** / **Codex** / **pi**：完整 TUI 可用（光标、清屏、Alt 屏、颜色）。
   - **cmd**：普通 Windows cmd shell。
-- **文件目录浏览**：右侧抽屉懒加载项目目录树，可折叠 / 拖拽调宽；支持在资源管理器中打开目录。
+- **文件目录浏览**：左侧活动栏点击打开，固定停靠面板懒加载项目目录树；支持在资源管理器中打开目录。
+- **Git 管理**：左侧固定停靠面板（与文件面板互斥）：查看分支与变更、勾选暂存 / 提交、Pull / Push、切换分支、浏览提交历史与 diff（增删行着色）。
 - **多栏分屏**：主区 1~4 栏并列，可同时查看多个会话 / 日志。
-- **侧栏可折叠**：侧栏宽度可拖拽调整，并可折叠为图标列；侧栏顶部支持一键全部折叠 / 全部展开项目卡片。
+- **左侧固定抽屉**：最左活动栏（项目 / 文件 / Git 三开关 + 底部设置），点按展开对应面板、再点收起；抽屉宽度可拖拽调整，固定挤压终端区不浮动遮挡；项目面板顶部支持一键全部折叠 / 全部展开项目卡片。
 - **文件夹选择**：原生文件夹选择对话框，免手填路径。
 - **可选桌面壳**：Tauri 打包成原生 Windows 应用，自带 WebView2 窗口与 NSIS 安装包。
 
@@ -85,7 +86,7 @@ npm start
 
 ### 添加一个项目
 
-1. 点击侧栏右上角「新建项目」。
+1. 点击项目面板右上角「新建项目」。
 2. 填写名称、选择类型（SpringBoot / Node / Folder）。
 3. 用「选择文件夹」指定项目路径。
 4. SpringBoot 填模块名（`moduleName`），可选「编译依赖模块」；Node 填启动命令。
@@ -190,6 +191,22 @@ PolyTaskPanel/
 | `GET` | `/api/projects/:id/files` | 列出项目目录的一层条目（供文件浏览抽屉懒加载树） |
 | `POST` | `/api/pick-folder` | 原生文件夹选择对话框 |
 
+### Git 管理
+
+`:id` 下统一前缀 `/git/`。非 git 仓库统一返回 `{ ok:false, notRepo:true }`。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/projects/:id/git/status` | 分支名 + 变更文件列表（porcelain XY 状态） |
+| `POST` | `/api/projects/:id/git/stage` | 暂存 / 取消暂存（body `files`、`unstage`） |
+| `POST` | `/api/projects/:id/git/commit` | 提交（body `message`） |
+| `POST` | `/api/projects/:id/git/push` | 推送（依赖命令行已配好的远端凭证） |
+| `POST` | `/api/projects/:id/git/pull` | 拉取（同上） |
+| `GET` | `/api/projects/:id/git/branches` | 本地分支列表 + 当前分支 |
+| `POST` | `/api/projects/:id/git/checkout` | 切换分支（body `branch`） |
+| `GET` | `/api/projects/:id/git/log` | 提交历史（`?limit=`，默认 30 上限 200） |
+| `GET` | `/api/projects/:id/git/diff` | diff（`?file=` 工作区 / `?cached=1` 已暂存 / `?commit=` 某次提交） |
+
 ### 终端会话
 
 `:type` 路径段为 `claude-sessions` / `codex-sessions` / `cmd-sessions` / `pi-sessions` 之一。
@@ -219,7 +236,7 @@ PolyTaskPanel/
 npm test
 ```
 
-覆盖 Claude / Codex / pi 会话契约、资源管理器与文件目录路由、面板共存与持久化、重连、侧栏缩放折叠等场景。
+覆盖 Claude / Codex / pi 会话契约、资源管理器与文件目录路由、面板共存与持久化、重连、左侧抽屉面板开关与调宽等场景。
 
 ---
 
