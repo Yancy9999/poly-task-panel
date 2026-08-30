@@ -1087,6 +1087,10 @@ function createTerm(sessionId, projectId, sessionNumber, type) {
   //   当 \x16 发给 PTY（无效），这里返回 false 让 xterm 提前 return，原生 paste 事件在 xterm
   //   textarea 上触发，走与 Ctrl+Shift+V 完全相同的 xterm 粘贴管线（换行归一化 + bracketed paste）。
   term.attachCustomKeyEventHandler((ev) => {
+    // F5 / Ctrl+F5 放行给浏览器：刷新页面。xterm 默认会把 F5 编码成 \x1b[15~ 发给 PTY
+    // 并 preventDefault，导致终端聚焦时 F5 被无声吞掉（页面不刷新、终端也无反应）；
+    // F5 在终端内无有意义语义，统一还给浏览器。keydown/keyup 成对放行保持事件对完整。
+    if (ev.key === 'F5') return false;
     if (ev.type === 'keydown' && ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey) {
       if (ev.key === 'Enter' || ev.code === 'Enter' || ev.code === 'NumpadEnter') {
         ev.preventDefault();
@@ -2747,8 +2751,10 @@ async function loadProjects() {
   updatePaneLogButtons();
   // 项目就绪后再重连保存的会话视图：需要 projects 解析 + 服务端会话列表
   await reconnectSessionPanes();
-  // 文件面板：若当前激活，跟随激活栏项目打开（激活栏空白则回退前次项目，从没打开过则空白占位）
+  // 项目就绪后再打开持久化为激活态的 file/git 面板（跟随激活栏项目 / 回退上次项目）：
+  // 此处执行才能正确解析项目绑定，且此时 restorePaneLayout 已完成、激活栏判定有效。
   if (sideDrawerPanel === 'file') openFileDrawer();
+  else if (sideDrawerPanel === 'git') openGitDrawer();
 }
 
 // ---------- 左侧固定抽屉：宽度拖拽 + 面板开关 ----------
@@ -3315,8 +3321,9 @@ function openGitDrawer(projectId) {
   } else if (!gitDrawerProjectId) {
     gitDrawerProjectId = localStorage.getItem(GIT_DRAWER_PROJECT_KEY) || null;
   }
-  // 绑定项目已删：回退空白
-  if (gitDrawerProjectId && !projects.find(x => x.id === gitDrawerProjectId)) {
+  // 绑定项目已删：回退空白。仅项目列表非空时判定——列表未加载（projects=[]）时
+  // 找不到 ≠ 已删除，避免时序问题误清持久化绑定（如刷新早期被调用）
+  if (gitDrawerProjectId && projects.length && !projects.find(x => x.id === gitDrawerProjectId)) {
     gitDrawerProjectId = null;
     localStorage.removeItem(GIT_DRAWER_PROJECT_KEY);
   }
@@ -3973,10 +3980,10 @@ function closeGitDiffModal() {
 
 // 启动即应用已保存的字体设置（localStorage，默认 Cascadia Code 13px）
 applyTermSettings();
-// 左侧抽屉：还原上次面板选择；文件面板持久化为开态时恢复上次项目 + 展开层级 + 选中态
+// 左侧抽屉：仅还原面板选择与开态（宽度/高亮/互斥显示）；file/git 面板的数据加载
+// 统一推迟到 loadProjects 项目就绪后（见 loadProjects 末尾）——提前打开会因 projects=[]
+// 把已持久化的项目绑定误判为"项目已删除"而清空，导致刷新后文件/Git 面板空白。
 applySideDrawerState();
-if (sideDrawerPanel === 'file') openFileDrawer();
-else if (sideDrawerPanel === 'git') openGitDrawer();
 // 初始分栏：优先恢复持久化的布局（栏数 + 每栏项目视图 + 激活栏），无则单栏空白。
 // 会话视图在 loadProjects 内经 reconnectSessionPanes 按服务端存活状态重连或回退空白。
 restorePaneLayout();
