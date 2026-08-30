@@ -1,7 +1,7 @@
 'use strict';
 // /api/projects/:id/files 路由：列出项目目录（或子目录）一层条目。
-// 用临时目录构造项目，断言：目录优先排序、隐藏文件过滤、路径沙箱化（../ 逃逸拒绝）、
-// 子目录懒加载、项目/目录不存在返回 404。
+// 用临时目录构造项目，断言：目录优先排序、黑名单过滤（.git/.svn 隐藏、.gitignore 显示）、
+// hide 参数覆盖、路径沙箱化（../ 逃逸拒绝）、子目录懒加载、项目/目录不存在返回 404。
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -21,11 +21,14 @@ before(() => {
   projRoot = path.join(tmpDir, 'myproj');
   subDir = path.join(projRoot, 'src');
   fs.mkdirSync(subDir, { recursive: true });
-  // 普通文件 + 隐藏文件 + 子目录内文件
+  // 普通文件 + 点号文件（.gitignore 应显示）+ 黑名单目录 + 子目录内文件
   regFile = path.join(projRoot, 'readme.md');
   fs.writeFileSync(regFile, 'hello');
   hiddenFile = path.join(projRoot, '.gitignore');
   fs.writeFileSync(hiddenFile, 'secret');
+  fs.mkdirSync(path.join(projRoot, '.git'));
+  fs.writeFileSync(path.join(projRoot, '.git', 'HEAD'), 'ref');
+  fs.mkdirSync(path.join(projRoot, '.svn'));
   fs.writeFileSync(path.join(subDir, 'index.js'), 'console.log(1)');
 
   projectsFile = path.join(tmpDir, 'projects.json');
@@ -35,6 +38,7 @@ before(() => {
   ], null, 2));
   process.env.PORT = '7956';
   process.env.PROJECTS_FILE = projectsFile;
+  process.env.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
   process.env.__PTP_TMPDIR__ = tmpDir;
 
   require('../server.js');
@@ -56,15 +60,17 @@ function get(queryPath) {
   });
 }
 
-test('根目录：目录优先排序、隐藏文件默认过滤', async () => {
+test('根目录：目录优先排序、黑名单默认过滤（.git/.svn 隐藏、.gitignore 显示）', async () => {
   const r = await get('/api/projects/good/files');
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.body.ok, true);
   assert.strictEqual(r.body.path, '');
   const names = r.body.items.map(i => i.name);
-  // src（目录）排在前，readme.md 在后；.gitignore 被过滤
+  // src（目录）排在前，readme.md 在后；.gitignore 不在黑名单，正常显示
   assert.ok(names.indexOf('src') < names.indexOf('readme.md'), '目录应排在文件前');
-  assert.ok(!names.includes('.gitignore'), '隐藏文件应默认隐藏');
+  assert.ok(!names.includes('.git'), '黑名单目录 .git 应隐藏');
+  assert.ok(!names.includes('.svn'), '黑名单目录 .svn 应隐藏');
+  assert.ok(names.includes('.gitignore'), '点号文件 .gitignore 不应被隐藏');
   const src = r.body.items.find(i => i.name === 'src');
   assert.strictEqual(src.isDir, true);
   assert.strictEqual(src.size, null);
@@ -73,10 +79,20 @@ test('根目录：目录优先排序、隐藏文件默认过滤', async () => {
   assert.strictEqual(file.size, 5);
 });
 
-test('all=1 显示隐藏文件', async () => {
-  const r = await get('/api/projects/good/files?all=1');
+test('hide 参数覆盖黑名单：hide=.gitignore 时显示 .git 之外仍按传入名单', async () => {
+  // 覆盖名单只含 .gitignore：.git/.svn 不再隐藏，.gitignore 反而隐藏
+  const r = await get('/api/projects/good/files?hide=' + encodeURIComponent('.gitignore'));
   const names = r.body.items.map(i => i.name);
-  assert.ok(names.includes('.gitignore'));
+  assert.ok(names.includes('.git'), '覆盖后 .git 不应隐藏');
+  assert.ok(names.includes('.svn'), '覆盖后 .svn 不应隐藏');
+  assert.ok(!names.includes('.gitignore'), '覆盖名单中的 .gitignore 应隐藏');
+});
+
+test('hide 参数精确匹配：hide=node_modules 不影响点号文件', async () => {
+  const r = await get('/api/projects/good/files?hide=node_modules');
+  const names = r.body.items.map(i => i.name);
+  assert.ok(names.includes('.git'), '.git 应隐藏（默认名单生效）');
+  assert.ok(names.includes('.gitignore'), '.gitignore 不应隐藏（精确匹配非前缀）');
 });
 
 test('子目录懒加载：sub=src 列出 index.js', async () => {

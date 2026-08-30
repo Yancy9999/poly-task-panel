@@ -44,6 +44,10 @@ const ROOT_DIR = __dirname;
 const PROJECTS_FILE = process.env.PROJECTS_FILE
   ? path.resolve(process.env.PROJECTS_FILE)
   : path.join(ROOT_DIR, 'projects.json');
+// SETTINGS_FILE 同理：设置面板全部配置（字体/命令/文件黑名单）持久化文件，测试用临时目录隔离。
+const SETTINGS_FILE = process.env.SETTINGS_FILE
+  ? path.resolve(process.env.SETTINGS_FILE)
+  : path.join(ROOT_DIR, 'settings.json');
 const PUBLIC_DIR = process.env.PUBLIC_DIR
   ? path.resolve(process.env.PUBLIC_DIR)
   : path.join(ROOT_DIR, 'public');
@@ -167,6 +171,68 @@ for (const p of projects) {
 }
 if (migrated) saveProjects(projects);
 rebuildProjectsIndex();
+
+// ---------------------------------------------------------------------------
+// 持久化：settings.json（设置面板全部配置：终端字体 / 各类命令 / 文件树黑名单）
+// 与 projects.json 同模式：启动读入内存，保存整体写回。字段做白名单过滤与
+// 容错归一（localStorage 旧数据 / 手改坏文件都不至于让接口 500）。
+// ---------------------------------------------------------------------------
+// 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响。
+const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
+// 默认字体与前端 FONT_PRESETS[0].value 保持一致（前端自定义字体时存的是完整 font-family 串）
+const DEFAULT_SETTINGS = {
+  fontFamily: '"Cascadia Code", Consolas, monospace',
+  fontSize: 13,
+  claudeCommands: null,
+  codexCommands: null,
+  piCommands: null,
+  fileHideList: DEFAULT_FILE_HIDE_LIST.slice(),
+};
+// 命令列表归一：[{cmd,desc}]，cmd 非空字符串；空列表/非法结构存 null（读取端回退默认命令集）
+function sanitizeCommandList(list) {
+  if (!Array.isArray(list)) return null;
+  const out = list
+    .filter((c) => c && typeof c === 'object' && typeof c.cmd === 'string' && c.cmd.trim())
+    .map((c) => ({ cmd: c.cmd.trim(), desc: typeof c.desc === 'string' ? c.desc.trim() : '' }));
+  return out.length ? out : null;
+}
+// 黑名单归一：字符串数组，去空白、去重；非法输入回退默认
+function sanitizeFileHideList(list) {
+  if (!Array.isArray(list)) return DEFAULT_FILE_HIDE_LIST.slice();
+  const out = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const s = item.trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out.length ? out : DEFAULT_FILE_HIDE_LIST.slice();
+}
+// 设置对象归一：只挑白名单字段，缺失字段用默认值补齐（前端逐版本加字段时旧文件也能读）
+function normalizeSettings(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const fontSize = Number(src.fontSize);
+  return {
+    fontFamily: typeof src.fontFamily === 'string' && src.fontFamily.trim() ? src.fontFamily.trim() : DEFAULT_SETTINGS.fontFamily,
+    fontSize: Number.isFinite(fontSize) ? Math.min(24, Math.max(10, fontSize)) : DEFAULT_SETTINGS.fontSize,
+    claudeCommands: sanitizeCommandList(src.claudeCommands),
+    codexCommands: sanitizeCommandList(src.codexCommands),
+    piCommands: sanitizeCommandList(src.piCommands),
+    fileHideList: sanitizeFileHideList(src.fileHideList),
+  };
+}
+function loadSettings() {
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+    return normalizeSettings(JSON.parse(raw));
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('读取 settings.json 失败:', e.message);
+    return DEFAULT_SETTINGS; // 无文件/坏文件：用默认（内存态），首次保存才落盘
+  }
+}
+function saveSettings(settings) {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+}
+let settings = loadSettings();
 
 // ---------------------------------------------------------------------------
 // 运行时进程注册表：projectId -> { proc, pid, pendingFlush }
@@ -680,7 +746,8 @@ for (const p of projects) {
 // Express REST API
 // ---------------------------------------------------------------------------
 const app = express();
-app.use(express.json());
+// json body 上限放宽到 3MB：编辑器保存（PUT file-content）内容上限 2MB，留余量给 JSON 包装
+app.use(express.json({ limit: '3mb' }));
 // 静态资源带短期缓存：开发期 1d，减少重复请求的重新验证。
 const staticOpts = { maxAge: '1d' };
 app.use(express.static(PUBLIC_DIR, staticOpts));
@@ -933,18 +1000,40 @@ app.post('/api/projects/:id/explorer', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------------------
+// 设置面板 API：GET /api/settings 读取，PUT /api/settings 保存（整体覆盖写回）。
+// 前端所有设置（字体/命令/文件黑名单）统一持久化到 settings.json，不再走 localStorage。
+// PUT 做白名单 + 归一（normalizeSettings），多余字段与非法值一律丢弃/回默认。
+// ---------------------------------------------------------------------------
+app.get('/api/settings', (req, res) => {
+  res.json({ ok: true, settings });
+});
+app.put('/api/settings', (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  settings = normalizeSettings(body);
+  try {
+    saveSettings(settings);
+  } catch (e) {
+    return res.status(500).json({ ok: false, msg: '保存设置失败: ' + (e.message || '') });
+  }
+  res.json({ ok: true, settings });
+});
+
 // 文件目录浏览：列出某项目目录（或其子目录）下的一层条目，供右侧文件浏览抽屉懒加载树。
 // 参数 sub：相对 projectPath 的子路径（前端展开某目录时传入）。做 path 沙箱化：
 // resolve 后必须仍在 projectPath 之下（或等于），防止 ../ 逃逸到项目目录外。
-// 默认隐藏点号开头文件（.git 等），可传 ?all=1 显示全部。node_modules 等大目录仍列出
-// 但不递归（前端按需展开）。
+// 过滤走黑名单：默认 .git/.svn（settings.json 的 fileHideList），前端可传 ?hide=逗号分隔
+// 覆盖（保存设置后无需重启即生效）。精确匹配条目名，.gitignore / .env 等不受影响。
+// node_modules 等大目录仍列出但不递归（前端按需展开）。
 app.get('/api/projects/:id/files', (req, res) => {
   const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   const base = p.projectPath;
   if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
   const sub = req.query.sub ? String(req.query.sub) : '';
-  const showAll = req.query.all === '1';
+  const hideList = req.query.hide !== undefined
+    ? sanitizeFileHideList(String(req.query.hide).split(','))
+    : settings.fileHideList;
   // 拼接并规范化：join 再 resolve，确保分隔符正确；最终校验仍在 base 下
   const target = path.resolve(path.join(base, sub));
   const rel = path.relative(base, target);
@@ -962,7 +1051,7 @@ app.get('/api/projects/:id/files', (req, res) => {
     return res.status(500).json({ ok: false, msg: '读取目录失败: ' + (err.message || '') });
   }
   const items = entries
-    .filter((e) => showAll || !e.name.startsWith('.'))
+    .filter((e) => !hideList.includes(e.name))
     .map((e) => {
       // Dirent 无 size 属性，文件条目需 stat 取大小；目录不附带（懒加载子层）
       let size = null;
@@ -1015,7 +1104,101 @@ app.get('/api/projects/:id/file-content', (req, res) => {
     return res.json({ ok: true, isBinary: true, size: stat.size });
   }
   // UTF-8 解码；非法字节序列会被替换为 U+FFFD（与编辑器打开乱码的行为一致）
-  res.json({ ok: true, content: buf.toString('utf8'), size: stat.size });
+  // mtime：读取时的修改时间（毫秒），保存（PUT）时回传做冲突检测
+  res.json({ ok: true, content: buf.toString('utf8'), size: stat.size, mtime: stat.mtimeMs });
+});
+
+// 文件保存（编辑器写入）：body { content, mtime }。与读取相同的沙箱化。
+// 冲突检测：mtime 与读取时不一致 => 说明文件被外部（git 操作/其他编辑器）改过，
+// 返回 conflict 标记，前端提示用户选择重新加载或强制覆盖，避免无声覆盖外部修改。
+// 限制：内容 ≤2MB（与查看上限一致）、目标必须是已存在的文件（不支持 PUT 新建，新建走 /files/new）。
+app.put('/api/projects/:id/file-content', (req, res) => {
+  const MAX_EDIT_FILE_SIZE = 2 * 1024 * 1024; // 2MB，与 GET 查看上限一致
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const sub = req.query.sub ? String(req.query.sub) : '';
+  if (!sub) return res.status(400).json({ ok: false, msg: '未指定文件路径' });
+  const target = path.resolve(path.join(base, sub));
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    return res.status(404).json({ ok: false, msg: '文件不存在: ' + sub });
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const content = typeof body.content === 'string' ? body.content : '';
+  if (Buffer.byteLength(content, 'utf8') > MAX_EDIT_FILE_SIZE) {
+    return res.status(413).json({ ok: false, msg: '内容超过大小上限（2MB）' });
+  }
+  // 冲突检测：客户端读取时记录的 mtime 与当前不一致 => 文件被外部修改过
+  const stat = fs.statSync(target);
+  const clientMtime = typeof body.mtime === 'number' ? body.mtime : null;
+  if (clientMtime !== null && stat.mtimeMs !== clientMtime) {
+    return res.status(409).json({ ok: false, conflict: true, mtime: stat.mtimeMs, msg: '文件已被外部修改' });
+  }
+  // 二进制防护：读取现有内容判 NUL——编辑器只服务文本文件，防止把二进制写坏
+  let old;
+  try {
+    old = fs.readFileSync(target);
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '读取文件失败: ' + (err.message || '') });
+  }
+  if (old.subarray(0, 8192).includes(0)) {
+    return res.status(415).json({ ok: false, isBinary: true, msg: '二进制文件不支持编辑' });
+  }
+  try {
+    fs.writeFileSync(target, content, 'utf8');
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '写入文件失败: ' + (err.message || '') });
+  }
+  // 返回写入后的新 mtime，前端更新 tab 记录，后续保存继续以此做冲突检测
+  res.json({ ok: true, size: Buffer.byteLength(content, 'utf8'), mtime: fs.statSync(target).mtimeMs });
+});
+
+// 新建文件/文件夹：body { parentSub, name, isDir }。parentSub 为目标父目录（'' = 项目根）。
+// 沙箱化同 /files；name 只取 basename（防止 name 里夹路径逃逸）；重名返回 409 冲突。
+app.post('/api/projects/:id/files/new', (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const parentSub = typeof body.parentSub === 'string' ? body.parentSub : '';
+  let name = typeof body.name === 'string' ? body.name.trim() : '';
+  const isDir = !!body.isDir;
+  if (!name) return res.status(400).json({ ok: false, msg: '名称不能为空' });
+  // name 必须是单段路径：含分隔符（a/b）、点号项（. / ..）或 Windows 非法字符一律拒绝，
+  // 杜绝借 name 夹带路径逃逸（parentSub 才是定位目录的唯一入口）
+  if (/[\\/]/.test(name) || name === '.' || name === '..' || /["<>|:*?]/.test(name)) {
+    return res.status(400).json({ ok: false, msg: '名称不合法（不能含路径分隔符或特殊字符）' });
+  }
+  const parent = path.resolve(path.join(base, parentSub));
+  const rel = path.relative(base, parent);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) {
+    return res.status(404).json({ ok: false, msg: '父目录不存在: ' + (parentSub || '项目根') });
+  }
+  const target = path.join(parent, name);
+  if (fs.existsSync(target)) {
+    return res.status(409).json({ ok: false, exists: true, msg: '同名条目已存在: ' + name });
+  }
+  try {
+    if (isDir) {
+      fs.mkdirSync(target);
+    } else {
+      fs.writeFileSync(target, '', 'utf8');
+    }
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '创建失败: ' + (err.message || '') });
+  }
+  // sub 一律用 / 分隔（与前端树、GET file-content 的 sub 参数一致）
+  const sub = parentSub ? parentSub.replace(/\\/g, '/').replace(/\/$/, '') + '/' + name : name;
+  res.json({ ok: true, sub, isDir });
 });
 
 // 日志历史：start.log 是全量历史（appendLog 同时写文件和内存缓冲），
@@ -1112,7 +1295,9 @@ function parseGitStatusPorcelain(stdout) {
     if (!line) continue;
     if (line.startsWith('## ')) {
       const head = line.slice(3);
-      const m = head.match(/^([^.\s]+)/);
+      // 空仓库首行为 "## No commits yet on master"——branch 取行尾的分支名
+      const noCommit = head.match(/^No commits yet on (.+)$/);
+      const m = noCommit ? { 1: noCommit[1] } : head.match(/^([^.\s]+)/);
       branch = m ? m[1] : null;
       const aheadM = head.match(/\bahead (\d+)/);
       const behindM = head.match(/\bbehind (\d+)/);
@@ -1238,6 +1423,43 @@ app.get('/api/projects/:id/git/branches', async (req, res) => {
     ? rr.stdout.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.endsWith('/HEAD'))
     : [];
   res.json({ ok: true, branches, current, remote });
+});
+
+// 初始化 git 仓库：git init（幂等，已 init 过的目录只是 reinitialize 无副作用）。
+// init 后抽屉重渲染即进入空仓库状态（默认分支 + 全量未跟踪文件），用户自行暂存提交。
+app.post('/api/projects/:id/git/init', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const r = await runGit(p, ['init']);
+  if (!r.ok) return res.json({ ok: false, msg: r.msg || 'git init 失败' });
+  res.json({ ok: true, msg: r.stdout.trim() });
+});
+
+// 远端 origin 的读取/设置：
+// GET  remote-url  → { ok, url }（无 origin 时 url 为 null，非仓库走 notRepo）
+// POST remote-set body { url } → 已有 origin 则 set-url，否则 add origin
+// url 为任意字符串直接传给 git remote，不经 shell 无注入风险；凭证会明文存入 .git/config，前端弹窗有提示。
+app.get('/api/projects/:id/git/remote-url', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const r = await runGit(p, ['remote', 'get-url', 'origin']);
+  if (r.ok) return res.json({ ok: true, url: r.stdout.trim() });
+  if (/No such remote/i.test(r.msg)) return res.json({ ok: true, url: null });
+  if (r.notRepo) return res.json({ ok: false, notRepo: true });
+  res.json({ ok: false, msg: r.msg || '读取远端失败' });
+});
+
+app.post('/api/projects/:id/git/remote-set', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const url = String((req.body && req.body.url) || '').trim();
+  if (!url) return res.status(400).json({ ok: false, msg: '远端 URL 不能为空' });
+  const cur = await runGit(p, ['remote', 'get-url', 'origin']);
+  const r = cur.ok
+    ? await runGit(p, ['remote', 'set-url', 'origin', url])
+    : await runGit(p, ['remote', 'add', 'origin', url]);
+  if (!r.ok) return res.json({ ok: false, msg: r.msg || '设置远端失败' });
+  res.json({ ok: true });
 });
 
 // 新建分支：body { name, from? }。from 为空从当前 HEAD 建；为远程分支名（origin/xxx）

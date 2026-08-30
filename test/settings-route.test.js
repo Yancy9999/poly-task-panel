@@ -1,0 +1,135 @@
+'use strict';
+// /api/settings 路由：设置面板全部配置（字体/命令/文件黑名单）的读取与保存。
+// 用临时目录跑独立 settings.json，断言：GET 默认值、PUT 落盘且 GET 回读一致、
+// 非法字段/多余字段被过滤、命令与黑名单归一（空值回默认）、PUT 后 /files 默认黑名单联动。
+const { test, before, after } = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const http = require('http');
+
+let srv = null;
+let tmpDir, projectsFile, settingsFile, projRoot;
+
+before(() => {
+  const origCreate = http.createServer;
+  http.createServer = (...a) => { srv = origCreate.apply(http, a); return srv; };
+
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptp-settings-'));
+  projRoot = path.join(tmpDir, 'proj');
+  fs.mkdirSync(projRoot, { recursive: true });
+  fs.writeFileSync(path.join(projRoot, '.gitignore'), 'x');
+  fs.mkdirSync(path.join(projRoot, '.git'));
+  fs.writeFileSync(path.join(projRoot, '.git', 'HEAD'), 'ref');
+
+  projectsFile = path.join(tmpDir, 'projects.json');
+  fs.writeFileSync(projectsFile, JSON.stringify([
+    { id: 'p1', name: 'Proj', projectPath: projRoot, type: 'folder' },
+  ], null, 2));
+  settingsFile = path.join(tmpDir, 'settings.json');
+  process.env.PORT = '7967';
+  process.env.PROJECTS_FILE = projectsFile;
+  process.env.SETTINGS_FILE = settingsFile;
+  process.env.__PTP_TMPDIR__ = tmpDir;
+
+  require('../server.js');
+});
+
+after(async () => {
+  if (srv && srv.listening) await new Promise((r) => srv.close(r));
+  const tmp = process.env.__PTP_TMPDIR__;
+  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+function get(queryPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: 'localhost', port: 7967, path: queryPath }, (res) => {
+      let raw = '';
+      res.on('data', (d) => raw += d);
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(raw || '{}') }));
+    }).on('error', reject);
+  });
+}
+function put(body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request({
+      host: 'localhost', port: 7967, path: '/api/settings', method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, (res) => {
+      let raw = '';
+      res.on('data', (d) => raw += d);
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(raw || '{}') }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+test('GET：无 settings.json 时返回默认设置（含文件黑名单默认值）', async () => {
+  const r = await get('/api/settings');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.ok, true);
+  const s = r.body.settings;
+  assert.strictEqual(s.fontFamily, '"Cascadia Code", Consolas, monospace');
+  assert.strictEqual(s.fontSize, 13);
+  assert.strictEqual(s.claudeCommands, null);
+  assert.deepStrictEqual(s.fileHideList, ['.git', '.svn']);
+});
+
+test('PUT：合法配置落盘，GET 回读一致，文件写入 settings.json', async () => {
+  const putRes = await put({
+    fontFamily: 'Consolas, monospace',
+    fontSize: 15,
+    claudeCommands: [{ cmd: '/clear', desc: '清空', extra: 'junk' }],
+    fileHideList: ['.git', 'node_modules', '.git', '  '],
+    evil: 'should-drop',
+  });
+  assert.strictEqual(putRes.status, 200);
+  assert.strictEqual(putRes.body.ok, true);
+  const s = putRes.body.settings;
+  assert.strictEqual(s.fontFamily, 'Consolas, monospace');
+  assert.strictEqual(s.fontSize, 15);
+  // 命令归一：多余字段被去掉
+  assert.deepStrictEqual(s.claudeCommands, [{ cmd: '/clear', desc: '清空' }]);
+  // 黑名单归一：去空白、去重
+  assert.deepStrictEqual(s.fileHideList, ['.git', 'node_modules']);
+  // 白名单之外的字段被过滤
+  assert.strictEqual(s.evil, undefined);
+
+  // 回读
+  const r = await get('/api/settings');
+  assert.deepStrictEqual(r.body.settings, s);
+
+  // 落盘
+  const onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.strictEqual(onDisk.fontFamily, 'Consolas, monospace');
+  assert.deepStrictEqual(onDisk.fileHideList, ['.git', 'node_modules']);
+});
+
+test('PUT 归一兜底：越界字号夹到边界、空黑名单回默认、空命令存 null', async () => {
+  const r = await put({ fontSize: 999, fileHideList: [], claudeCommands: [{ desc: 'no cmd' }] });
+  const s = r.body.settings;
+  assert.strictEqual(s.fontSize, 24); // 越界夹到上限（不回默认，保证用户输入被纠正而非丢弃）
+  assert.deepStrictEqual(s.fileHideList, ['.git', '.svn']); // 空名单回默认
+  assert.strictEqual(s.claudeCommands, null); // 无有效命令存 null
+});
+
+test('PUT 空 object body：归一为默认设置而非 500', async () => {
+  // 注：body-parser strict 模式只接 {} / [] 开头的 JSON，顶层标量在中间件层即 400，
+  // 路由内 normalizeSettings 的非对象兜底针对的是 req.body 为 undefined 等场景。
+  const r = await put({});
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.ok, true);
+  assert.deepStrictEqual(r.body.settings.fileHideList, ['.git', '.svn']);
+});
+
+test('PUT 后 /files 默认黑名单联动：fileHideList=node_modules 时 .git 仍隐藏', async () => {
+  await put({ fileHideList: ['node_modules'] });
+  const r = await get('/api/projects/p1/files');
+  const names = r.body.items.map(i => i.name);
+  assert.ok(names.includes('.git'), '新黑名单不含 .git，应显示');
+  assert.ok(names.includes('.gitignore'), '.gitignore 应显示');
+});

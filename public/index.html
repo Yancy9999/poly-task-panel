@@ -15,7 +15,7 @@
 <script src="/vendor/hljs/highlight.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2329; height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #1d1f21; color: #e3e3e3; color-scheme: dark; height: 100vh; display: flex; flex-direction: column; }
   .main { flex: 1; display: flex; overflow: hidden; min-height: 0; padding: 0; gap: 0; }
   /* 左侧固定抽屉：活动栏右边的停靠面板容器（项目/文件/Git 三选一），固定参与 flex 布局
      （挤压终端区而非浮动遮挡），点外部不收起；宽度拖拽可调并持久化，收起时 display:none。 */
@@ -137,75 +137,79 @@
   .console-body .placeholder { color: #6b6d70; font-style: italic; }
   .pane-log { white-space: pre-wrap; word-break: break-all; }
   /* 模态框 */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; }
+  /* 模态弹窗基础层级 400：高于文件编辑器浮动窗(150)，编辑器开着时弹窗不会被盖住；
+     file-view-overlay 自带 z-index:150（声明在后覆盖此值），不受影响 */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 400; }
   .modal-overlay.show { display: flex; }
-  .modal { position: relative; background: #fff; border-radius: 10px; padding: 24px; width: 480px; max-width: 90vw; }
-  .modal h2 { font-size: 16px; margin-bottom: 18px; }
+  /* 模态框：深色主题（与终端/抽屉同色系） */
+  .modal { position: relative; background: #232528; border: 1px solid #3a3c3f; color: #e3e3e3; border-radius: 10px; padding: 24px; width: 480px; max-width: 90vw; }
+  .modal h2 { font-size: 16px; margin-bottom: 18px; color: #e3e3e3; }
   .modal .field { margin-bottom: 14px; }
-  .modal label { display: block; font-size: 13px; color: #4e5969; margin-bottom: 6px; }
-  .modal input { width: 100%; padding: 8px 10px; border: 1px solid #e5e6eb; border-radius: 6px; font-size: 13px; }
+  .modal label { display: block; font-size: 13px; color: #86909c; margin-bottom: 6px; }
+  .modal input { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; background: #1d1f21; color: #e3e3e3; border-radius: 6px; font-size: 13px; }
   .modal input:focus { outline: none; border-color: #165dff; }
   .modal .type-group { display: flex; gap: 12px; }
-  .modal .type-group label { flex: 1; padding: 10px; border: 1px solid #e5e6eb; border-radius: 6px; text-align: center; cursor: pointer; }
+  .modal .type-group label { flex: 1; padding: 10px; border: 1px solid #3a3c3f; border-radius: 6px; text-align: center; cursor: pointer; }
   .modal .type-group input { width: auto; }
-  .modal .type-group label.selected { border-color: #165dff; background: #e8f3ff; color: #165dff; }
+  .modal .type-group label.selected { border-color: #165dff; background: rgba(22,93,255,.15); color: #4a9eff; }
   /* 项目目录输入框 + 「选择」按钮同行 */
   .path-row { display: flex; gap: 8px; }
   .path-row input { flex: 1; min-width: 0; }
-  .path-pick { flex-shrink: 0; padding: 8px 18px; border: 1px solid #e5e6eb; background: #f7f8fa; color: #4e5969; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all .12s; }
-  .path-pick:hover { border-color: #165dff; color: #165dff; background: #e8f3ff; }
+  .path-pick { flex-shrink: 0; padding: 8px 18px; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all .12s; }
+  .path-pick:hover { border-color: #165dff; color: #4a9eff; background: rgba(22,93,255,.1); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
   .modal-actions button { padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; border: none; }
-  .modal-actions .cancel { background: #f2f3f5; color: #4e5969; }
+  .modal-actions .cancel { background: #2a2e33; color: #86909c; }
+  .modal-actions .cancel:hover { background: #3a3c3f; color: #e3e3e3; }
   .modal-actions .save { background: #165dff; color: #fff; }
   .modal-actions .save:hover { background: #0e42d2; }
   /* 设置模态框：左侧菜单栏（字体/关于）+ 右侧内容区 + 底部靠右按钮。
      固定高度：切换字体/关于标签时面板高度保持一致，内容区内部滚动。 */
   .settings-modal { width: 640px; max-width: 92vw; position: relative; height: 560px; display: flex; flex-direction: column; }
-  .settings-modal select { width: 100%; padding: 8px 10px; border: 1px solid #e5e6eb; border-radius: 6px; font-size: 13px; background: #fff; color: #1f2329; }
+  .settings-modal select { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 13px; background: #1d1f21; color: #e3e3e3; }
   .settings-modal select:focus { outline: none; border-color: #165dff; }
-  .settings-modal textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #e5e6eb; border-radius: 6px; font-size: 12px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1.7; background: #fff; color: #1f2329; resize: vertical; }
+  .settings-modal textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 12px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1.7; background: #1d1f21; color: #e3e3e3; resize: vertical; }
   .settings-modal textarea:focus { outline: none; border-color: #165dff; }
-  .settings-modal .reset-cmd-btn { margin-top: 6px; padding: 4px 10px; border: 1px solid #e5e6eb; background: #fff; border-radius: 5px; font-size: 12px; color: #4e5969; cursor: pointer; transition: all .12s; }
-  .settings-modal .reset-cmd-btn:hover { border-color: #165dff; color: #165dff; }
+  .settings-modal .reset-cmd-btn { margin-top: 6px; padding: 4px 10px; border: 1px solid #3a3c3f; background: #2a2e33; border-radius: 5px; font-size: 12px; color: #86909c; cursor: pointer; transition: all .12s; }
+  .settings-modal .reset-cmd-btn:hover { border-color: #165dff; color: #4a9eff; }
   .settings-modal .set-hint { font-size: 11px; color: #86909c; margin-top: 4px; line-height: 1.5; }
   /* 预览：深色底与终端面板一致，便于确认中英文对齐渲染 */
   .settings-modal .set-preview { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 12px 14px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
   .settings-layout { display: flex; gap: 20px; flex: 1; min-height: 0; }
   /* 左侧菜单栏 */
-  .settings-nav { flex-shrink: 0; width: 120px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #f2f3f5; padding-right: 20px; }
-  .settings-nav-item { padding: 8px 12px; border: none; background: none; border-radius: 6px; font-size: 13px; color: #4e5969; cursor: pointer; text-align: left; transition: all .12s; }
-  .settings-nav-item:hover { background: #f7f8fa; color: #1f2329; }
-  .settings-nav-item.active { background: #e8f3ff; color: #165dff; font-weight: 600; }
+  .settings-nav { flex-shrink: 0; width: 120px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #3a3c3f; padding-right: 20px; }
+  .settings-nav-item { padding: 8px 12px; border: none; background: none; border-radius: 6px; font-size: 13px; color: #86909c; cursor: pointer; text-align: left; transition: all .12s; }
+  .settings-nav-item:hover { background: #2a2e33; color: #e3e3e3; }
+  .settings-nav-item.active { background: rgba(22,93,255,.15); color: #4a9eff; font-weight: 600; }
   /* 右侧内容区：超高时内部滚动，避免撑高面板 */
   .settings-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding-right: 4px; }
   .settings-content::-webkit-scrollbar { width: 5px; }
-  .settings-content::-webkit-scrollbar-thumb { background: #e5e6eb; border-radius: 4px; }
-  .settings-content::-webkit-scrollbar-thumb:hover { background: #c9cdd4; }
+  .settings-content::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
+  .settings-content::-webkit-scrollbar-thumb:hover { background: #4e5969; }
   .settings-content::-webkit-scrollbar-track { background: transparent; }
-  .settings-tab h2 { font-size: 15px; margin-bottom: 14px; }
-  .settings-modal .modal-actions { border-top: 1px solid #f2f3f5; padding-top: 16px; margin-top: 18px; }
+  .settings-tab h2 { font-size: 15px; margin-bottom: 14px; color: #e3e3e3; }
+  .settings-modal .modal-actions { border-top: 1px solid #3a3c3f; padding-top: 16px; margin-top: 18px; }
   /* 关闭叉叉：设置面板右上角，全局替代「取消」。SVG 图标保证 flex 居中，不随字体基线偏移 */
-  .settings-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #e5e6eb; background: #f7f8fa; color: #4e5969; cursor: pointer; border-radius: 6px; transition: all .12s; }
+  .settings-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 6px; transition: all .12s; }
   .settings-close svg { width: 16px; height: 16px; display: block; }
-  .settings-close:hover { background: #ffece8; border-color: #fbc4c4; color: #f53f3f; }
+  .settings-close:hover { background: rgba(245,63,63,.15); border-color: rgba(245,63,63,.45); color: #f56a6a; }
   /* 通用关闭叉叉：所有弹窗面板右上角，复用设置面板同款样式 */
-  .modal-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #e5e6eb; background: #f7f8fa; color: #4e5969; cursor: pointer; border-radius: 6px; transition: all .12s; }
+  .modal-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 6px; transition: all .12s; }
   .modal-close svg { width: 16px; height: 16px; display: block; }
-  .modal-close:hover { background: #ffece8; border-color: #fbc4c4; color: #f53f3f; }
+  .modal-close:hover { background: rgba(245,63,63,.15); border-color: rgba(245,63,63,.45); color: #f56a6a; }
   /* 关于页：markdown 渲染区。滚动由外层 .settings-content 承担（固定面板高度） */
-  .about-body { color: #1f2329; font-size: 13px; line-height: 1.75; }
+  .about-body { color: #e3e3e3; font-size: 13px; line-height: 1.75; }
   .about-body h1 { font-size: 18px; margin: 0 0 10px; }
   .about-body h2 { font-size: 15px; margin: 14px 0 6px; }
   .about-body h3, .about-body h4 { font-size: 14px; margin: 12px 0 6px; }
   .about-body p { margin: 8px 0; }
   .about-body ul, .about-body ol { margin: 8px 0; padding-left: 20px; }
   .about-body li { margin: 3px 0; }
-  .about-body code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; background: #f2f3f5; color: #d4380d; padding: 1px 5px; border-radius: 4px; }
-  .about-body pre { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  .about-body code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; background: #2a2e33; color: #ff9a6b; padding: 1px 5px; border-radius: 4px; }
+  .about-body pre { background: #1d1f21; color: #e3e3e3; border: 1px solid #3a3c3f; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
   .about-body pre code { background: none; color: inherit; padding: 0; }
-  .about-body hr { border: none; border-top: 1px solid #e5e6eb; margin: 14px 0; }
-  .about-body blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid #a8d3ff; background: #f7f8fa; color: #4e5969; border-radius: 0 6px 6px 0; }
+  .about-body hr { border: none; border-top: 1px solid #3a3c3f; margin: 14px 0; }
+  .about-body blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid #a8d3ff; background: #2a2e33; color: #86909c; border-radius: 0 6px 6px 0; }
   .about-body a { color: #165dff; text-decoration: none; }
   .about-body a:hover { text-decoration: underline; }
   .about-body .about-loading, .about-body .about-error { color: #86909c; }
@@ -214,31 +218,31 @@
      浅色 toast 浮于顶部居中，配色按状态区分：info 蓝 / warning 橙 / error 红，
      均为项目既有色板（#165dff / #ff8f1f / #f53f3f）的浅色底 + 同系描边；
      自毁 + 可手动关闭；确认框复用 .modal 卡片样式。 */
-  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid; border-radius: 8px; font-size: 13px; color: #1f2329; box-shadow: 0 4px 12px rgba(0,0,0,.12); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: 60vw; padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; font-size: 13px; color: #e3e3e3; box-shadow: 0 4px 12px rgba(0,0,0,.4); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: 60vw; padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .15s; }
   .toast.show { opacity: 1; pointer-events: auto; }
   .toast .toast-icon { display: inline-flex; flex-shrink: 0; width: 16px; height: 16px; }
   .toast .toast-icon svg { width: 100%; height: 100%; }
   .toast .toast-close { background: none; border: none; color: #86909c; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; flex-shrink: 0; }
-  .toast .toast-close:hover { color: #1f2329; }
-  .toast.info { background: #e8f3ff; border-color: #a8d3ff; }
-  .toast.info .toast-icon { color: #165dff; }
-  .toast.warning { background: #fff7e8; border-color: #fcd9b6; }
+  .toast .toast-close:hover { color: #e3e3e3; }
+  .toast.info { border-color: rgba(22,93,255,.45); }
+  .toast.info .toast-icon { color: #4a9eff; }
+  .toast.warning { border-color: rgba(255,143,31,.45); }
   .toast.warning .toast-icon { color: #ff8f1f; }
-  .toast.error { background: #ffece8; border-color: #fbc4c4; }
-  .toast.error .toast-icon { color: #f53f3f; }
-  /* 分栏 tab 右键菜单 */
-  .pane-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #fff; border: 1px solid #e5e6eb; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 4px; display: none; }
+  .toast.error { border-color: rgba(245,63,63,.5); }
+  .toast.error .toast-icon { color: #f56a6a; }
+  /* 分栏 tab 右键菜单：深色（与文件树右键菜单同款） */
+  .pane-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.4); padding: 4px; display: none; }
   .pane-context-menu.show { display: block; }
-  .pane-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #1f2329; cursor: pointer; border-radius: 4px; }
-  .pane-context-menu button:hover { background: #f2f3f5; }
-  .pane-context-menu button:disabled { color: #c9cdd4; cursor: not-allowed; }
+  .pane-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
+  .pane-context-menu button:hover { background: #3a3c3f; }
+  .pane-context-menu button:disabled { color: #6b6d70; cursor: not-allowed; }
   .pane-context-menu button:disabled:hover { background: none; }
   /* 文件树右键菜单：深色样式（与文件抽屉同色系 #1d1f21/#2a2e33） */
   .file-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.4); padding: 4px; display: none; }
   .file-context-menu.show { display: block; }
   .file-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
   .file-context-menu button:hover { background: #3a3c3f; }
-  .confirm-modal p { font-size: 13px; color: #4e5969; line-height: 1.7; white-space: pre-line; margin-bottom: 18px; }
+  .confirm-modal p { font-size: 13px; color: #a9aeb8; line-height: 1.7; white-space: pre-line; margin-bottom: 18px; }
   /* 命令查看模态框 */
   .cmd-modal { width: 640px; max-width: 90vw; }
   .cmd-pre { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 14px 16px; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto; }
@@ -262,10 +266,14 @@
   /* 每栏 header = 标题栏条：左侧 tab（形状化标题，激活凸起 + 顶边蓝条），右侧标题栏工具区（全高分隔线隔开）。
      让「tab」与「标题栏上的按钮」在视觉上彻底分离。 */
   .pane-header { flex-shrink: 0; display: flex; align-items: stretch; height: 36px; background: #232528; color: #86909c; font-size: 12px; border-bottom: 1px solid #2a2e33; cursor: default; user-select: none; }
-  /* tab：撑满 header 高度、圆角上沿；激活态提亮 + 顶部蓝条凸起，形似悬浮在标题栏上的页签 */
-  .pane-tab { display: inline-flex; align-items: center; min-width: 0; max-width: 60%; padding: 0 12px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c; border-top: 2px solid transparent; border-radius: 5px 5px 0 0; }
+  /* tab：撑满 header 高度；激活态的提亮/蓝条画在整个 header 上（贯穿整栏宽度），tab 本身只承载文字 */
+  .pane-tab { display: inline-flex; align-items: center; min-width: 0; max-width: 60%; padding: 0 12px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c; }
   .pane-tab .pane-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pane.active .pane-tab { background: #2a2e33; color: #e3e3e3; border-top-color: #165dff; }
+  /* 激活整栏贯穿：header 整条提亮 + 顶部 2px 蓝条横跨全宽（::before 铺满 header 顶边），
+     header 底边线同步消失，与终端 body 视觉连成一体 */
+  .pane.active .pane-header { background: #2a2e33; border-bottom-color: transparent; position: relative; }
+  .pane.active .pane-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #165dff; }
+  .pane.active .pane-tab { color: #e3e3e3; }
   /* 标题栏工具区：靠右端，与 tab 区以全高分隔线隔开；承载 启/停/重/清 + 关闭 + 分栏 按钮 */
   .pane-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; padding: 0 4px 0 10px; flex-shrink: 0; }
   /* 标题栏图标按钮：ghost 灰底图标，语义色只在 hover 显现 */
@@ -286,8 +294,8 @@
   .pane:hover .pane-header .pane-close, .pane.active .pane-header .pane-close { opacity: .85; }
   .pane:hover .pane-header .pane-close { opacity: .85; }
   /* 分栏按钮：标题栏上的描边高亮按钮，一眼区别于 tab 与 ghost 控制按钮 */
-  .pane-header .pane-tools .pane-split { border: 1px solid #e5e6eb; background: #fff; color: #1f2329; }
-  .pane-header .pane-tools .pane-split:hover:not(:disabled) { border-color: #165dff; background: #f2f3f5; color: #165dff; }
+  .pane-header .pane-tools .pane-split { border: 1px solid #3a3c3f; background: #2a2e33; color: #a9aeb8; }
+  .pane-header .pane-tools .pane-split:hover:not(:disabled) { border-color: #165dff; background: rgba(22,93,255,.1); color: #4a9eff; }
   .pane-header .pane-tools .pane-split:disabled { opacity: .4; }
   /* 文件目录浏览按钮样式已移除：入口移至最左活动栏（activity-bar） */
   .pane-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
@@ -381,14 +389,7 @@
   /* ---------- 文件目录浏览面板（左侧固定抽屉） ----------
      原 .console 右缘浮动叠层已并入左侧 .side-drawer（panel-file），固定停靠挤压终端区；
      不再需要独立调宽条/浮动定位，宽度统一走抽屉容器 sideDrawerWidth。 */
-  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
-  .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
-  .file-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
-  .file-drawer-header .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
-  .file-drawer-header .pane-btn:disabled:hover { background: transparent; color: #86909c; }
-  .file-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
-  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 0; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
   .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
   .file-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
@@ -477,6 +478,8 @@
   .git-net-row .git-ab.behind { background: #1c2f4a; color: #79a8ff; }
   /* 分组标题：staged / unstaged / 历史。padding-left 与 .git-file-row 一致，全选勾选框与文件勾选框纵向对齐 */
   .git-section-title { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; padding-left: 6px; font-size: 11px; color: #86909c; font-weight: 600; }
+  /* 「提交历史」与上方变更文件列表之间的分割线：#3a3c3f 比 #2a2e33 高两档，深底上肉眼可辨 */
+  .git-section-title.history { border-top: 1px solid #3a3c3f; padding-top: 10px; margin-top: 14px; }
   .git-section-title .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 500; }
   /* 分组标题全选勾选框：与文件行勾选框同宽纵向对齐 */
   .git-section-title input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; }
@@ -540,30 +543,56 @@
   .git-empty { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; text-align: center; }
   .git-loading { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; }
   .git-not-repo { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; line-height: 1.8; }
-  /* 文件内容查看模态框（只读）：可拖动/可缩放的"桌面窗口"式弹窗。
-     overlay 不用 flex 居中——窗口位置由 JS 控制（拖动改 left/top，缩放改宽高并保持对边固定）。 */
-  .file-view-overlay { display: none; background: rgba(0,0,0,0.35); z-index: 150; }
+  /* 非仓库占位页的初始化按钮：主蓝底与提交按钮同款 */
+  .git-init-btn { margin-top: 10px; padding: 6px 20px; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 12px; cursor: pointer; transition: background .12s; }
+  .git-init-btn:hover { background: #0e42d2; }
+  .git-init-btn:disabled { opacity: .4; cursor: not-allowed; }
+  /* 无远端引导：提交历史上方的小字提示 */
+  .git-remote-hint { margin: 0 0 8px; padding: 6px 10px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 5px; font-size: 11px; color: #86909c; line-height: 1.5; }
+  /* 文件编辑器窗口（多 tab）：可拖动/可缩放的"桌面窗口"式浮动窗。
+     非模态：overlay 全透明且 pointer-events:none（点击穿透到后面的 UI），
+     仅窗口本体接收交互；窗口位置由 JS 控制（拖动改 left/top，缩放改宽高并保持对边固定）。 */
+  .file-view-overlay { display: none; background: transparent; z-index: 150; pointer-events: none; }
   .file-view-overlay.show { display: block; }
-  .file-view-modal { position: fixed; left: 50%; top: 50%; width: 860px; height: 620px; max-width: none; padding: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: visible; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .file-view-overlay.hidden-win { display: none; } /* 编辑器收起态：窗口隐藏但 tab 保留（活动栏按钮可唤回） */
+  .file-view-modal { position: fixed; left: 50%; top: 50%; width: 860px; height: 620px; max-width: none; padding: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: visible; box-shadow: 0 12px 40px rgba(0,0,0,.45); border: 1px solid #3a3c3f; pointer-events: auto; }
   /* 标题栏：拖动把手（cursor:move），双击还原默认大小。高度压到一行文本（~24px） */
-  .file-view-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 0 10px; height: 24px; border-bottom: 1px solid #e5e6eb; border-radius: 10px 10px 0 0; cursor: move; user-select: none; flex-shrink: 0; background: #f7f8fa; }
+  .file-view-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 0 10px; height: 24px; border-bottom: 1px solid #3a3c3f; border-radius: 10px 10px 0 0; cursor: move; user-select: none; flex-shrink: 0; background: #232528; }
   /* 用 .modal 前缀抬优先级：否则全局 .modal h2 的 margin-bottom:18px 会盖掉 margin:0，
      导致标题在 24px 标题栏里贴顶/偏移 */
-  .modal .file-view-title { font-size: 12.5px; margin: 0; line-height: 24px; font-family: Consolas, "Cascadia Code", monospace; font-weight: 600; color: #1f2329; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  .modal .file-view-title { font-size: 12.5px; margin: 0; line-height: 24px; font-family: Consolas, "Cascadia Code", monospace; font-weight: 600; color: #e3e3e3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
   .file-view-titlebar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .file-view-tb-btn { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #e5e6eb; background: #fff; color: #4e5969; cursor: pointer; border-radius: 4px; transition: all .12s; flex-shrink: 0; }
+  .file-view-tb-btn { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 4px; transition: all .12s; flex-shrink: 0; }
   .file-view-tb-btn svg { width: 12px; height: 12px; display: block; }
-  .file-view-tb-btn:hover { border-color: #165dff; color: #165dff; }
+  .file-view-tb-btn:hover { border-color: #165dff; color: #4a9eff; }
+  .file-view-tb-btn.active { border-color: #165dff; background: #165dff; color: #fff; }
+  /* tab 栏：每打开一个文件一个 tab。tab 只显示文件名（title 悬浮完整路径），脏标记为左侧圆点 */
+  .fv-tabbar { display: none; align-items: stretch; gap: 2px; padding: 3px 6px 0; background: #232528; border-bottom: 1px solid #3a3c3f; overflow-x: auto; scrollbar-width: thin; flex-shrink: 0; user-select: none; }
+  .fv-tabbar.has-tabs { display: flex; }
+  .fv-tab { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; padding: 3px 8px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; font-size: 12px; font-family: Consolas, "Cascadia Code", monospace; color: #86909c; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .fv-tab .fv-tab-name { overflow: hidden; text-overflow: ellipsis; }
+  .fv-tab:hover { background: #2a2e33; }
+  .fv-tab.active { background: #1d1f21; border-color: #3a3c3f; color: #e6edf3; font-weight: 600; }
+  .fv-tab .fv-tab-dirty { display: none; width: 6px; height: 6px; border-radius: 50%; background: #ff7d00; flex-shrink: 0; }
+  .fv-tab.dirty .fv-tab-dirty { display: inline-block; }
+  .fv-tab .fv-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 3px; color: #86909c; flex-shrink: 0; }
+  .fv-tab .fv-tab-close:hover { background: #3a3c3f; color: #e3e3e3; }
+  .fv-tab .fv-tab-close svg { width: 9px; height: 9px; }
+  /* tab 拖动排序：拖动中的 tab 半透明让位视觉；落点指示线（before 元素画在目标位） */
+  .fv-tab.dragging { opacity: .45; }
+  .fv-tabbar { position: relative; }
   .file-view-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 0 0 10px 10px; }
   .file-view-loading { padding: 30px; text-align: center; color: #86909c; font-size: 13px; font-style: italic; }
-  .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #f7f8fa; border: 1px solid #e5e6eb; border-radius: 8px; color: #4e5969; font-size: 13px; line-height: 1.7; }
-  /* 代码区：行号列 + 高亮代码，pre 内滚动（不用 overlay 滚动，缩放时尺寸跟随窗口） */
+  .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; color: #86909c; font-size: 13px; line-height: 1.7; }
+  /* 代码区：行号 gutter + 代码两列，pre 内滚动（不用 overlay 滚动，缩放时尺寸跟随窗口）。
+     常态即编辑态（contenteditable code）。gutter 是 code 的兄弟元素，不在编辑区里——
+     innerText 读不到，行号不会混进文件内容；行数由 JS 按内容行数刷新（输入时 debounce）。 */
   /* 字体/字号不写死：由 JS 写入（跟随设置面板的终端字体，见 applyTermSettings） */
-  .file-view-pre { flex: 1; min-height: 0; margin: 0; overflow: auto; line-height: 1; tab-size: 4; border-radius: 0 0 10px 10px; background: #0d1117; }
-  .file-view-pre code { display: block; padding: 12px 16px; white-space: pre; }
-  /* 每行一个块级容器：宽随内容（长行撑开，供 pre 横向滚动），min-width 保证短行行号也贴左 */
-  .file-view-pre .fv-line { display: block; width: fit-content; min-width: 100%; }
-  .file-view-pre .fv-ln { display: inline-block; position: sticky; left: 0; min-width: 3.2em; margin-right: 14px; padding-right: 10px; text-align: right; color: #484f58; background: #0d1117; user-select: none; border-right: 1px solid #1c2128; }
+  .file-view-pre { flex: 1; min-height: 0; margin: 0; overflow: auto; display: flex; align-items: stretch; line-height: 1.35; tab-size: 4; border-radius: 0 0 10px 10px; background: #0d1117; }
+  /* gutter：随 pre 纵向滚动、横向固定（sticky left），数字右对齐，与代码行同 line-height */
+  .fv-gutter { flex-shrink: 0; position: sticky; left: 0; min-width: 3.2em; padding: 12px 10px 12px 6px; text-align: right; color: #484f58; background: #0d1117; user-select: none; border-right: 1px solid #1c2128; white-space: pre; z-index: 1; }
+  .file-view-pre code { flex: 1; display: block; padding: 12px 16px 12px 14px; white-space: pre; outline: none; caret-color: #e6edf3; min-width: 0; }
+  .file-view-pre code:empty::before { content: '\200b'; } /* 空文件也给占位高度，否则光标敲不进 */
   /* 八方向缩放手柄：贴边透明热区，hover 显紫色描边提示；角上的热区比边大 */
   .fv-rz { position: absolute; z-index: 10; }
   .fv-rz-n { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
@@ -586,6 +615,7 @@
     <button id="activityProjectBtn" title="项目列表" onclick="toggleSidePanel('project')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></button>
     <button id="activityFileBtn" title="文件目录浏览" onclick="toggleSidePanel('file')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></button>
     <button id="activityGitBtn" title="Git 管理" onclick="toggleSidePanel('git')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+    <button id="activityEditorBtn" title="文件编辑器" onclick="toggleFileViewWindow()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     <button class="gear-btn" title="设置（终端/日志字体）" onclick="openSettingsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </div>
   <!-- 左侧固定抽屉：三面板共用一个停靠容器（互斥显示），固定挤压终端区，点外部不收起 -->
@@ -607,12 +637,14 @@
     <div class="side-panel panel-file" id="panelFile">
       <div class="file-drawer-header">
         <span class="file-drawer-title" id="fileDrawerTitle">文件</span>
+        <button class="pane-btn" id="fileDrawerCollapseAll" title="全部折叠" onclick="collapseAllFileTree()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg></button>
+        <button class="pane-btn" id="fileDrawerExpandAll" title="全部展开" onclick="expandAllFileTree()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg></button>
         <button class="pane-btn" id="fileDrawerRefresh" title="刷新" onclick="refreshFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         <button class="pane-btn" id="fileDrawerExplorer" title="在资源管理器中打开" onclick="openExplorerFromFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
         <button class="pane-btn" title="关闭" onclick="closeFileDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       </div>
       <div class="file-drawer-breadcrumb" id="fileDrawerBreadcrumb"></div>
-      <div class="file-drawer-tree" id="fileDrawerTree"></div>
+      <div class="file-drawer-tree" id="fileDrawerTree" oncontextmenu="if (event.target === this) { event.preventDefault(); showFileTreeBlankContextMenu(event); }"></div>
     </div>
     <!-- Git 面板：原右缘 Git 抽屉内容原封迁移 -->
     <div class="side-panel panel-git" id="panelGit">
@@ -730,22 +762,31 @@
   </div>
 </div>
 
-<!-- 文件内容查看模态框（只读）：可拖动（标题栏）、可缩放（八方向边角）、双击标题还原默认。
-     内容由 highlight.js 高亮渲染（深色主题），带行号。大文件/二进制文件给出友好提示。 -->
+<!-- 文件编辑器窗口（可多开 tab）：可拖动（标题栏）、可缩放（八方向边角）、双击标题还原默认。
+     标题栏下是 tab 栏（每文件一个 tab，显示文件名、悬浮完整路径、脏标记圆点）。
+     常态即编辑态：code 恒为 contenteditable，行号用 CSS counter 自动编号（随编辑增删行实时重算）；
+     打开时高亮渲染，键入后为纯文本（高亮仅在打开/保存重渲时刷新，避免编辑中重排破坏光标）。
+     大文件/二进制文件给出友好提示。 -->
 <div class="modal-overlay file-view-overlay" id="fileViewOverlay">
   <div class="modal file-view-modal" id="fileViewModal">
     <div class="file-view-titlebar" id="fileViewTitlebar">
       <h2 id="fileViewTitle" class="file-view-title">文件</h2>
       <div class="file-view-titlebar-actions">
+        <button type="button" class="file-view-tb-btn" id="fileViewSaveBtn" title="保存（Ctrl+S）" onclick="saveFileViewActive()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+        <button type="button" class="file-view-tb-btn" id="fileViewReloadBtn" title="重新加载磁盘内容（未保存的修改将丢失）" onclick="reloadFileViewActive()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         <button type="button" class="file-view-tb-btn" id="fileViewRestoreBtn" title="还原默认大小" onclick="resetFileViewSize()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg></button>
         <button type="button" class="file-view-tb-btn" id="fileViewMaxBtn" title="最大化" onclick="toggleFileViewMax()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></button>
-        <button type="button" class="file-view-tb-btn" title="关闭" onclick="closeFileViewer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+        <button type="button" class="file-view-tb-btn" title="最小化（tab 保留，活动栏按钮可唤回）" onclick="hideFileViewWindow()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
       </div>
     </div>
+    <div class="fv-tabbar" id="fvTabbar"></div>
     <div class="file-view-body" id="fileViewBody">
       <div class="file-view-loading" id="fileViewLoading">加载中…</div>
       <div class="file-view-notice" id="fileViewNotice" style="display:none"></div>
-      <pre class="file-view-pre hljs" id="fileViewPre" style="display:none"><code id="fileViewCode"></code></pre>
+      <div class="file-view-pre hljs" id="fileViewPre" style="display:none">
+        <div class="fv-gutter" id="fvGutter"></div>
+        <code id="fileViewCode" contenteditable="plaintext-only" spellcheck="false"></code>
+      </div>
     </div>
     <!-- 八方向缩放手柄：n/s/e/w 四边 + ne/nw/se/sw 四角 -->
     <div class="fv-rz fv-rz-n" data-rz="n"></div>
@@ -775,9 +816,20 @@
   <button data-act="close-all">关闭全部栏</button>
 </div>
 
-<!-- 文件树右键菜单：深色样式（与文件抽屉同色系），在资源管理器中打开选中项 -->
+<!-- 文件树右键菜单：深色样式（与文件抽屉同色系），新建文件/文件夹 + 在资源管理器中打开选中项 -->
 <div class="file-context-menu" id="fileContextMenu">
+  <button data-act="new-file">新建文件</button>
+  <button data-act="new-dir">新建文件夹</button>
   <button data-act="reveal">在资源管理器中打开</button>
+</div>
+
+<!-- 编辑器 tab 右键菜单：关闭系列（复用文件树菜单深色样式） -->
+<div class="file-context-menu" id="fvTabContextMenu">
+  <button data-act="close">关闭</button>
+  <button data-act="close-left">关闭左侧</button>
+  <button data-act="close-right">关闭右侧</button>
+  <button data-act="close-others">关闭其他</button>
+  <button data-act="close-all">关闭全部</button>
 </div>
 
 <!-- Git 历史右键菜单：未推送的提交可软撤回（复用文件树菜单深色样式） -->
@@ -786,6 +838,7 @@
 </div>
 
 <!-- 自绘确认框（替代原生 confirm） -->
+<!-- 确认框：z-index 走 .modal-overlay 基础值 400，高于文件编辑器窗口(150) -->
 <div class="modal-overlay" id="confirmOverlay">
   <div class="modal confirm-modal">
     <button type="button" class="modal-close" id="confirmClose" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
@@ -806,6 +859,7 @@
       <div class="settings-nav">
         <button type="button" class="settings-nav-item active" data-settings-tab="font" onclick="switchSettingsTab('font')">字体</button>
         <button type="button" class="settings-nav-item" data-settings-tab="commands" onclick="switchSettingsTab('commands')">命令</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="files" onclick="switchSettingsTab('files')">文件</button>
         <button type="button" class="settings-nav-item" data-settings-tab="about" onclick="switchSettingsTab('about')">关于</button>
       </div>
       <div class="settings-content">
@@ -846,6 +900,15 @@
             <label>Pi 命令</label>
             <textarea id="setPiCommands" rows="7" spellcheck="false"></textarea>
             <button type="button" class="reset-cmd-btn" onclick="resetCommandsText('pi')">恢复默认</button>
+          </div>
+        </div>
+        <div class="settings-tab" id="settingsTabFiles" style="display:none">
+          <h2>文件</h2>
+          <div class="set-hint" style="margin-bottom:12px">文件抽屉中不显示的目录/文件名黑名单。每行一条，精确匹配名称（如 <b>.git</b>、<b>.svn</b>、<b>node_modules</b>）；不影响其它点号开头文件（.gitignore / .env 等正常显示）。</div>
+          <div class="field">
+            <label>隐藏名单</label>
+            <textarea id="setFileHideList" rows="7" spellcheck="false"></textarea>
+            <button type="button" class="reset-cmd-btn" onclick="resetFileHideListText()">恢复默认</button>
           </div>
         </div>
         <div class="settings-tab" id="settingsTabAbout" style="display:none">
@@ -2385,9 +2448,11 @@ function closeCmdModal() {
   document.getElementById('cmdOverlay').classList.remove('show');
 }
 
-// ---------- 设置（终端/日志字体） ----------
+// ---------- 设置（终端/日志字体 + 命令 + 文件黑名单） ----------
+// 全部配置统一持久化到服务端 settings.json（GET/PUT /api/settings），不再写 localStorage。
+// SETTINGS_KEY 仅作旧版迁移读取：启动时若服务端尚无 settings.json，把 localStorage 旧配置
+// 一次性搬上服务端后清除（见 bootSettings）。
 // 字体设置作用于两块：claude/codex 终端会话（xterm）+ 宿主日志面板。
-// 存 localStorage；新建会话由 createTerm 读取，保存时对已有会话热更新。
 const SETTINGS_KEY = 'tacTermSettings';
 const FONT_PRESETS = [
   { key: 'cascadia', label: 'Cascadia Code（当前默认）', value: '"Cascadia Code", Consolas, monospace' },
@@ -2397,7 +2462,9 @@ const FONT_PRESETS = [
   { key: 'sarasa', label: '等距更纱黑体 Sarasa Mono（中英文字宽一致）', value: '"Sarasa Mono SC", Consolas, monospace' },
 ];
 const CUSTOM_FONT_KEY = '__custom__';
-const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null };
+// 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响
+const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
+const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice() };
 const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 24;
 
 // 命令列表 <-> 设置页 textarea 文本：每行一条「命令|中文说明」，说明可省略；空行忽略。
@@ -2426,24 +2493,79 @@ function normalizeFontFamily(f, fallback = DEFAULT_SETTINGS.fontFamily) {
   return /monospace/i.test(s) ? s : `${s}, monospace`;
 }
 
-function loadTermSettings() {
-  let raw = null;
-  try { raw = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch (e) { raw = null; }
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
+// 服务端返回/本地迁移数据的归一：结构对齐后端 normalizeSettings，非法值回默认
+function normalizeLocalSettings(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const fontSize = Number(src.fontSize);
+  let fileHideList = DEFAULT_FILE_HIDE_LIST.slice();
+  if (Array.isArray(src.fileHideList)) {
+    const out = src.fileHideList.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+    if (out.length) fileHideList = [...new Set(out)];
+  }
   return {
-    fontFamily: normalizeFontFamily(raw.fontFamily),
-    fontSize: Number.isFinite(raw.fontSize) ? raw.fontSize : DEFAULT_SETTINGS.fontSize,
-    claudeCommands: sanitizeCommandList(raw.claudeCommands),
-    codexCommands: sanitizeCommandList(raw.codexCommands),
-    piCommands: sanitizeCommandList(raw.piCommands),
+    fontFamily: normalizeFontFamily(src.fontFamily),
+    fontSize: Number.isFinite(fontSize) ? Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, fontSize)) : DEFAULT_SETTINGS.fontSize,
+    claudeCommands: sanitizeCommandList(src.claudeCommands),
+    codexCommands: sanitizeCommandList(src.codexCommands),
+    piCommands: sanitizeCommandList(src.piCommands),
+    fileHideList,
   };
 }
 
-const termSettings = loadTermSettings();
+// 设置加载/保存走服务端。启动时 termSettings 先用默认值占位，bootSettings() 异步拉取
+// 服务端配置后替换并热应用；加载失败（服务端不可达）保持默认值，保存接口会重试落盘。
+const termSettings = { ...DEFAULT_SETTINGS, fileHideList: DEFAULT_FILE_HIDE_LIST.slice() };
+let settingsReady = false; // bootSettings 完成后置 true；完成前打开设置面板由其 await 等待
+
+async function bootSettings() {
+  let localLegacy = null;
+  try { localLegacy = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch (e) { localLegacy = null; }
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.msg || 'HTTP ' + res.status);
+    let serverSettings = data.settings;
+    // 一次性迁移：本地有旧配置（老版本存 localStorage）且服务端 settings.json 尚是
+    // 纯默认值（文件未落盘的首次升级/新装场景）时，把旧值推给服务端。迁移成功则以
+    // 服务端返回为准；失败不阻断，沿用服务端值。无论成败都清掉 localStorage（此后以服务端为准）。
+    const hasLegacy = localLegacy && typeof localLegacy === 'object'
+      && (localLegacy.fontFamily || localLegacy.fontSize != null
+        || localLegacy.claudeCommands || localLegacy.codexCommands || localLegacy.piCommands);
+    const serverIsDefault = !Array.isArray(data.settings.fileHideList)
+      || data.settings.fileHideList.join(',') === DEFAULT_FILE_HIDE_LIST.join(',');
+    if (hasLegacy && serverIsDefault) {
+      try {
+        const put = await fetch('/api/settings', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizeLocalSettings(localLegacy)),
+        });
+        const putData = await put.json();
+        if (putData.ok) serverSettings = putData.settings;
+      } catch (e) { /* 迁移失败不阻断 */ }
+    }
+    Object.assign(termSettings, normalizeLocalSettings(serverSettings));
+    localStorage.removeItem(SETTINGS_KEY);
+    applyTermSettings();
+  } catch (e) {
+    // 服务端不可达：termSettings 保持默认值，等下次保存时重建
+  } finally {
+    settingsReady = true;
+  }
+}
+
+// 等待启动加载完成（设置面板打开时回填需要真实值；最长等 2s 防接口挂死卡面板）
+async function ensureSettingsReady() {
+  if (settingsReady) return;
+  await Promise.race([
+    (async () => { while (!settingsReady) await new Promise(r => setTimeout(r, 50)); })(),
+    new Promise(r => setTimeout(r, 2000)),
+  ]);
+}
 
 // 热更新：日志面板（console-body 字体属性）+ 所有已有 xterm 会话。展示中的会话顺带 re-fit
 // 并同步 PTY 行列；隐藏会话（挂暂存区 display:none）fit 会算错，等显示到栏时再 fit。
 function applyTermSettings() {
+
   const fontFamily = normalizeFontFamily(termSettings.fontFamily);
   const fontSize = termSettings.fontSize;
   const body = document.querySelector('.console-body');
@@ -2464,7 +2586,8 @@ function applyTermSettings() {
 }
 
 // ---------- 设置模态框 ----------
-function openSettingsModal() {
+async function openSettingsModal() {
+  await ensureSettingsReady(); // 服务端配置未就绪时稍等（最长 2s），避免回填到默认占位值
   const sel = document.getElementById('setFontFamily');
   // 每次打开重建选项：选项源自 FONT_PRESETS + 自定义
   sel.innerHTML = FONT_PRESETS.map(p => `<option value="${p.key}">${p.label}</option>`).join('')
@@ -2483,6 +2606,8 @@ function openSettingsModal() {
   document.getElementById('setClaudeCommands').value = commandsToText(getSlashCommands('claude'));
   document.getElementById('setCodexCommands').value = commandsToText(getSlashCommands('codex'));
   document.getElementById('setPiCommands').value = commandsToText(getSlashCommands('pi'));
+  // 文件页：黑名单每行一条回填
+  document.getElementById('setFileHideList').value = (termSettings.fileHideList || []).join('\n');
   updateSettingsPreview();
   switchSettingsTab('font'); // 每次打开默认落在「字体」页
   document.getElementById('settingsOverlay').classList.add('show');
@@ -2500,6 +2625,7 @@ function switchSettingsTab(tab) {
   });
   document.getElementById('settingsTabFont').style.display = tab === 'font' ? '' : 'none';
   document.getElementById('settingsTabCommands').style.display = tab === 'commands' ? '' : 'none';
+  document.getElementById('settingsTabFiles').style.display = tab === 'files' ? '' : 'none';
   document.getElementById('settingsTabAbout').style.display = tab === 'about' ? '' : 'none';
   document.getElementById('settingsSaveBtn').style.display = tab === 'about' ? 'none' : '';
   if (tab === 'about') loadAboutContent();
@@ -2510,6 +2636,11 @@ function resetCommandsText(type) {
   const list = DEFAULT_SLASH_COMMANDS[type] || [];
   const elId = type === 'codex' ? 'setCodexCommands' : (type === 'pi' ? 'setPiCommands' : 'setClaudeCommands');
   document.getElementById(elId).value = commandsToText(list);
+}
+
+// 文件页「恢复默认」：仅回填 textarea（未落盘），点「保存」才生效。
+function resetFileHideListText() {
+  document.getElementById('setFileHideList').value = DEFAULT_FILE_HIDE_LIST.join('\n');
 }
 
 // 关于页内容：fetch 根目录 ABOUT.md（server 路由 /about.md），本地轻量渲染。
@@ -2609,7 +2740,7 @@ function updateSettingsPreview() {
   pre.style.fontSize = size + 'px';
 }
 
-function saveSettings() {
+async function saveSettings() {
   const sel = document.getElementById('setFontFamily');
   let fontFamily;
   if (sel.value === CUSTOM_FONT_KEY) {
@@ -2628,10 +2759,26 @@ function saveSettings() {
   termSettings.claudeCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setClaudeCommands').value));
   termSettings.codexCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setCodexCommands').value));
   termSettings.piCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setPiCommands').value));
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(termSettings));
+  // 文件黑名单：每行一条名称，去空行/去重；全空回退默认
+  const hideRaw = document.getElementById('setFileHideList').value.split('\n').map(s => s.trim()).filter(Boolean);
+  termSettings.fileHideList = hideRaw.length ? [...new Set(hideRaw)] : DEFAULT_FILE_HIDE_LIST.slice();
+  // 持久化到服务端 settings.json（不再写 localStorage）
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(termSettings),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.msg || 'HTTP ' + res.status);
+    Object.assign(termSettings, normalizeLocalSettings(data.settings)); // 以服务端归一结果为准
+  } catch (e) {
+    showToast('设置保存失败: ' + (e.message || ''), 'error');
+    return;
+  }
   applyTermSettings();
-  closeSettingsModal();
-  showToast('设置已保存', 'info');
+  // 黑名单可能影响文件树展示：抽屉开着时刷新（重建缓存重新拉取）
+  if (fileDrawerProjectId) refreshFileDrawer();
+  closeSettingsModal(); // 保存成功不提示：设置即时生效（字体/预览可见变化），弹窗关闭即反馈
 }
 
 // ---------- 删除 ----------
@@ -3181,12 +3328,12 @@ function renderFileDrawerTitle() {
   if (!el) return;
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   el.textContent = proj ? `文件 · ${proj.name}` : '文件';
-  // 刷新/资源管理器按钮：无绑定项目（空白态）时禁用
+  // 刷新/展开折叠/资源管理器按钮：无绑定项目（空白态）时禁用
   const hasProj = !!proj;
-  const refresh = document.getElementById('fileDrawerRefresh');
-  const explorer = document.getElementById('fileDrawerExplorer');
-  if (refresh) refresh.disabled = !hasProj;
-  if (explorer) explorer.disabled = !hasProj;
+  for (const id of ['fileDrawerRefresh', 'fileDrawerExplorer', 'fileDrawerExpandAll', 'fileDrawerCollapseAll']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !hasProj;
+  }
 }
 // 激活栏切换联动文件面板：见 activatePane / syncFileDrawerToPane（面板展开时跟随激活栏项目）。
 
@@ -3202,7 +3349,8 @@ async function loadFileDir(sub, toCache) {
   }
   try {
     const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
-    const resp = await fetch(`/api/projects/${proj.id}/files${q}`);
+    const sep = q ? '&' : '?';
+    const resp = await fetch(`/api/projects/${proj.id}/files${q}${sep}hide=${encodeURIComponent((termSettings.fileHideList || []).join(','))}`);
     const data = await resp.json();
     if (!data.ok) {
       // 还原路径（toCache）失败：目录可能已被删除/改名，静默从展开集合移除并持久化，
@@ -3308,7 +3456,8 @@ async function loadFileDirIntoCache(sub, silent) {
   // 占位 loading 行：在选中目录行下方插一个临时行
   try {
     const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
-    const resp = await fetch(`/api/projects/${proj.id}/files${q}`);
+    const sep = q ? '&' : '?';
+    const resp = await fetch(`/api/projects/${proj.id}/files${q}${sep}hide=${encodeURIComponent((termSettings.fileHideList || []).join(','))}`);
     const data = await resp.json();
     if (!data.ok) { showToast(data.msg || '读取目录失败', 'error'); return; }
     if (!renderFileTree.cache) renderFileTree.cache = new Map();
@@ -3328,6 +3477,44 @@ function refreshFileDrawer() {
   persistFileDrawerState();
   loadFileDir('');
 }
+
+// ---------- 全部折叠 / 全部展开（文件树） ----------
+// 折叠：清空展开集合并重渲染（缓存保留，无需重新请求）。
+// 展开：递归拉取所有目录层（node_modules/超大目录会全量请求——按黑名单过滤后的可见目录计算），
+// 全部写缓存后一次渲染。拉取期间根层先渲染，避免闪空白。
+async function expandAllFileTree() {
+  if (!fileDrawerProjectId) return;
+  // 根未加载先拉根
+  if (!renderFileTree.cache || !renderFileTree.cache.has('')) {
+    await loadFileDir('', true);
+  }
+  // BFS：从根开始逐层展开，把所有目录 sub 收进展开集合并补拉子层
+  const queue = [''];
+  const allDirs = [];
+  while (queue.length) {
+    const sub = queue.shift();
+    allDirs.push(sub);
+    let items = renderFileTree.cache ? renderFileTree.cache.get(sub) : null;
+    if (!items) {
+      await loadFileDir(sub, true);
+      items = renderFileTree.cache.get(sub);
+    }
+    if (!items) continue;
+    for (const it of items) {
+      if (it.isDir) queue.push(sub ? `${sub}/${it.name}` : it.name);
+    }
+  }
+  fileTreeExpanded = new Map(allDirs.map(s => [s, true]));
+  persistFileDrawerState();
+  renderFileTree();
+}
+
+function collapseAllFileTree() {
+  if (!fileDrawerProjectId) return;
+  fileTreeExpanded = new Map();
+  persistFileDrawerState();
+  renderFileTree();
+}
 function openExplorerFromFileDrawer() {
   if (fileDrawerProjectId) openExplorer(fileDrawerProjectId);
 }
@@ -3336,9 +3523,20 @@ function showFileContextMenu(event, row) {
   const menu = document.getElementById('fileContextMenu');
   menu.dataset.sub = row.dataset.sub;
   menu.dataset.isdir = row.dataset.isdir;
+  openFileContextMenuAt(event);
+}
+// 树空白处右键：目标为项目根（sub=''、isdir=1），新建文件/文件夹落在根目录
+function showFileTreeBlankContextMenu(event) {
+  const menu = document.getElementById('fileContextMenu');
+  menu.dataset.sub = '';
+  menu.dataset.isdir = '1';
+  openFileContextMenuAt(event);
+}
+function openFileContextMenuAt(event) {
+  const menu = document.getElementById('fileContextMenu');
   // 菜单位置：不超出视口
   const x = Math.min(event.clientX, window.innerWidth - 180);
-  const y = Math.min(event.clientY, window.innerHeight - 50);
+  const y = Math.min(event.clientY, window.innerHeight - 110);
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
   menu.classList.add('show');
@@ -3360,6 +3558,80 @@ function execFileContextAction(act) {
       targetSub = slash >= 0 ? sub.slice(0, slash) : '';
     }
     openExplorer(fileDrawerProjectId, targetSub);
+    return;
+  }
+  if (act === 'new-file' || act === 'new-dir') {
+    if (!fileDrawerProjectId) { showToast('未绑定项目，无法新建', 'warning'); return; }
+    // 目录行 = 在该目录下创建；文件行 = 在其同级目录创建；空白 = 项目根
+    const parentSub = isDir ? sub : (sub.includes('/') ? sub.slice(0, sub.lastIndexOf('/')) : '');
+    promptNewEntryName(act === 'new-dir').then((name) => {
+      if (name) createNewEntry(parentSub, name, act === 'new-dir');
+    });
+  }
+}
+
+// 新建名称输入：自绘小输入框（复用 confirm 模态的观感不合适，直接用内联 prompt 简化：
+// 项目无原生 prompt 可用 WebView 中也可，但保持与现有自绘风格一致走 showConfirm 风格的 promise）。
+// 简化实现：showConfirm 不支持输入，这里用动态创建的单输入小模态。
+function promptNewEntryName(isDir) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay show'; // 动态创建必须自带 show：.modal-overlay 默认 display:none
+    ov.style.zIndex = 500;
+    ov.innerHTML = `<div class="modal confirm-modal">
+      <h2>${isDir ? '新建文件夹' : '新建文件'}</h2>
+      <p style="margin-bottom:8px">名称：</p>
+      <input type="text" id="fvNewName" style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:13px" />
+      <div class="modal-actions">
+        <button class="cancel" id="fvNewCancel">取消</button>
+        <button class="save" id="fvNewOk">创建</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    const input = ov.querySelector('#fvNewName');
+    input.focus();
+    const done = (val) => {
+      ov.remove();
+      resolve(val);
+    };
+    ov.querySelector('#fvNewOk').onclick = () => done(input.value.trim() || null);
+    ov.querySelector('#fvNewCancel').onclick = () => done(null);
+    ov.onclick = (e) => { if (e.target === ov) done(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') done(input.value.trim() || null);
+      if (e.key === 'Escape') done(null);
+    });
+  });
+}
+
+// 新建文件/文件夹：POST /files/new，成功后展开父目录并刷新；新建文件同时以 tab 打开
+async function createNewEntry(parentSub, name, isDir) {
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  if (!proj) return;
+  try {
+    const resp = await fetch(`/api/projects/${proj.id}/files/new`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parentSub, name, isDir }),
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      showToast(data.msg || (resp.status === 409 ? '同名条目已存在' : '创建失败'), 'error');
+      return;
+    }
+    // 成功不提示（需求）；树联动只刷新受影响目录的缓存，不动展开状态：
+    //   父目录当前已展开（或新建在根）→ 拉新数据后重渲染，新条目随即出现；
+    //   父目录未展开 → 只静默更新缓存，树保持原样（用户展开时自然可见）。
+    if (fileDrawerProjectId === proj.id) {
+      const target = parentSub || '';
+      const visible = target === '' || fileTreeExpanded.has(target);
+      if (renderFileTree.cache) renderFileTree.cache.delete(target);
+      await loadFileDir(target, true);
+      if (visible) renderFileTree();
+    }
+    if (!isDir) openFileViewer(data.sub);
+  } catch (e) {
+    showToast('创建失败: ' + e.message, 'error');
   }
 }
 // 抽屉调宽统一走左侧 .side-drawer 容器拖拽条（initDrawerDrag），面板内不再单独调宽
@@ -3505,7 +3777,7 @@ async function loadGitStatus() {
     return;
   }
   if (data.notRepo) {
-    body.innerHTML = '<div class="git-not-repo">该目录不是 git 仓库</div>';
+    body.innerHTML = `<div class="git-not-repo">该目录不是 git 仓库<br/><button class="git-init-btn" onclick="gitInitRepo()">初始化仓库</button></div>`;
     renderGitDrawerTitle();
     return;
   }
@@ -3516,6 +3788,17 @@ async function loadGitStatus() {
   gitStatus = data;
   renderGitDrawerTitle();
   renderGitBody();
+  // 异步探测是否配置了远端 origin：没有则 renderGitBody 里显示「连接远端」引导。
+  // 不阻塞主区渲染；探测结果只在无远端时触发一次重渲染（有远端时无感）
+  gitFetch('remote-url')
+    .then((r) => {
+      if (!gitStatus || gitStatus.branch !== data.branch) return;
+      if (r.ok && r.url == null && !gitStatus.remoteAbsent) {
+        gitStatus.remoteAbsent = true;
+        renderGitBody();
+      }
+    })
+    .catch(() => {});
   // 状态区渲染后异步补拉分支列表与历史（不阻塞主区）
   loadGitBranches();
   gitLogCache = [];
@@ -3613,7 +3896,6 @@ async function gitBranchCreate() {
       if (errEl) errEl.textContent = data.msg || '新建分支失败';
       return;
     }
-    showToast(`已创建并切换到 ${trim}`, 'info');
     gitBranchPop = null;
     gitLogCache = [];
     await loadGitStatus();
@@ -3699,15 +3981,27 @@ function renderGitBody() {
   if (gitBranchPop === 'menu') parts.push(renderGitBranchMenu(branch));
   else if (gitBranchPop === 'new') parts.push(renderGitBranchNewForm(branch));
   // push / pull 行：中文按钮 + 领先/落后徽标（ahead→待推送，behind→待拉取）；
-  // 任一网络操作在途时两个按钮都保持 disabled（重渲染恢复，防中途重复点击）
+  // 任一网络操作在途时两个按钮都保持 disabled（重渲染恢复，防中途重复点击）。
+  // 未配置远端（remoteAbsent）时隐藏拉取/推送：点了必然报错，只留「远端」引导配置
   const netBusy = gitNetInFlight.size > 0;
+  const noRemote = !!gitStatus.remoteAbsent;
   parts.push(`<div class="git-net-row">
-    <button data-net="pull" onclick="gitPull()" ${netBusy ? 'disabled' : ''}>拉取${abBadge(behind, 'behind', '远端领先 ' + behind + ' 个提交') || ''}</button>
-    <button data-net="push" onclick="gitPush()" ${netBusy ? 'disabled' : ''}>推送${abBadge(ahead, 'ahead', '本地领先 ' + ahead + ' 个提交') || ''}</button>
+    ${noRemote ? '' : `<button data-net="pull" onclick="gitPull()" ${netBusy ? 'disabled' : ''}>拉取${abBadge(behind, 'behind', '远端领先 ' + behind + ' 个提交') || ''}</button>
+    <button data-net="push" onclick="gitPush()" ${netBusy ? 'disabled' : ''}>推送${abBadge(ahead, 'ahead', '本地领先 ' + ahead + ' 个提交') || ''}</button>`}
+    <button data-net="remote" title="设置远端 origin 地址（推送/拉取的目标仓库）" onclick="promptGitRemoteUrl()">远端</button>
   </div>`);
   if (!files.length) {
     parts.push('<div class="git-empty">工作区干净，没有变更</div>');
   } else {
+    // 提交区：紧跟拉取/推送按钮下方（提交说明 + 提交 / 提交并推送 两个按钮）；
+    // 未配置远端时只显示「提交」——「提交并推送」点了必然推送失败
+    parts.push(`<div class="git-commit-area">
+      <textarea id="gitCommitMsg" placeholder="提交说明（必填）" rows="2"></textarea>
+      <div class="git-commit-btns">
+        <button class="git-commit-btn" onclick="gitCommit(false)">提交</button>
+        ${noRemote ? '' : '<button class="git-commit-btn secondary" onclick="gitCommit(true)">提交并推送</button>'}
+      </div>
+    </div>`);
     // staged 区：勾选框状态 = git 真实暂存状态（已暂存默认勾上，取消勾选即 unstage）；组标题带「全选」
     if (staged.length) {
       parts.push(gitSectionTitleWithAll('已暂存', staged.length, 'staged'));
@@ -3738,16 +4032,14 @@ function renderGitBody() {
           ${fileCell(f.file)}
         </div>`).join(''));
     }
-    // 提交区：提交 / 提交并推送 两个按钮
-    parts.push(`<div class="git-commit-area">
-      <textarea id="gitCommitMsg" placeholder="提交说明（必填）" rows="2"></textarea>
-      <div class="git-commit-btns">
-        <button class="git-commit-btn" onclick="gitCommit(false)">提交</button>
-        <button class="git-commit-btn secondary" onclick="gitCommit(true)">提交并推送</button>
-      </div>
-    </div>`);
   }
-  parts.push('<div class="git-section-title" style="margin-top:14px">提交历史</div><div id="gitLogList"><div class="git-loading">加载中…</div></div>');
+  parts.push('<div class="git-section-title history">提交历史</div>');
+  // 无远端引导：gitStatus.remoteAbsent 由 loadGitStatus 补拉 remote-url 后置位，
+  // 有远端前推送/拉取不可用，在这里指路（重渲染后消失）
+  if (gitStatus.remoteAbsent) {
+    parts.push('<div class="git-remote-hint">尚未连接远端仓库，点上方「远端」按钮配置地址后即可推送 / 拉取</div>');
+  }
+  parts.push('<div id="gitLogList"><div class="git-loading">加载中…</div></div>');
   body.innerHTML = parts.join('');
 }
 function escapeJs(s) {
@@ -3793,7 +4085,7 @@ async function onGitBranchChange(branch) {
       body: JSON.stringify({ branch }),
     });
     if (!data.ok) { showToast(data.msg || '切换分支失败', 'error'); }
-    else { gitBranchPop = null; showToast(`已切换到 ${branch}`, 'info'); gitLogCache = []; }
+    else { gitBranchPop = null; gitLogCache = []; } // 成功不提示：分支名/状态刷新即反馈
     await loadGitStatus();
   } catch (e) {
     showToast('切换分支失败: ' + e.message, 'error');
@@ -3820,8 +4112,7 @@ async function gitNetwork(route, label) {
   setNetDisabled(true);
   try {
     const data = await gitFetch(route, { method: 'POST' });
-    if (!data.ok) showToast(`${label}失败`, 'error');
-    else showToast(`${label}成功`, 'info');
+    if (!data.ok) showToast(`${label}失败`, 'error'); // 成功不提示：徽标/状态刷新即反馈
     await loadGitStatus();
   } catch (e) {
     showToast(`${label}失败: ` + e.message, 'error');
@@ -3844,7 +4135,6 @@ async function gitCommit(andPush) {
       body: JSON.stringify({ message }),
     });
     if (!data.ok) { showToast('提交失败', 'error'); return; }
-    if (!andPush) { showToast('已提交', 'info'); }
     gitLogCache = [];
     if (andPush) {
       await gitNetwork('push', '推送');   // 内部推送成功/失败后都会 loadGitStatus
@@ -3855,6 +4145,80 @@ async function gitCommit(andPush) {
     showToast('提交失败', 'error');
   }
 }
+// 非仓库占位页「初始化仓库」：确认后 git init，成功重渲染抽屉进入空仓库状态（无成功 toast）
+async function gitInitRepo() {
+  const proj = projects.find(x => x.id === gitDrawerProjectId);
+  if (!proj) return;
+  const ok = await showConfirm(`将在项目目录初始化 git 仓库：\n${proj.projectPath}`, '初始化 git 仓库');
+  if (!ok) return;
+  const btn = document.querySelector('.git-init-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await gitFetch('init', { method: 'POST' });
+    if (!data.ok) { showToast(data.msg || '初始化失败', 'error'); if (btn) btn.disabled = false; return; }
+    await loadGitStatus();
+  } catch (e) {
+    showToast('初始化失败: ' + e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 「远端」按钮：读取当前 origin URL 弹输入框（预填=可改地址），确认后 remote-set。
+// URL 含凭证时会明文存入 .git/config，弹窗内有提示。
+async function promptGitRemoteUrl() {
+  let curUrl = null;
+  try {
+    const data = await gitFetch('remote-url');
+    if (data.ok) curUrl = data.url;
+    else if (!data.notRepo && data.msg) { showToast(data.msg, 'error'); return; }
+  } catch (e) { showToast('读取远端失败: ' + e.message, 'error'); return; }
+  const url = await promptRemoteUrlInput(curUrl);
+  if (url === null) return; // 取消
+  try {
+    const data = await gitFetch('remote-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!data.ok) { showToast(data.msg || '设置远端失败', 'error'); return; }
+    await loadGitStatus(); // 重渲染：拉取/推送按钮即刻生效（无成功 toast）
+  } catch (e) {
+    showToast('设置远端失败: ' + e.message, 'error');
+  }
+}
+
+// 远端 URL 输入弹窗（动态创建，同 promptNewEntryName 模式）：curUrl 为 null 时是首次添加
+function promptRemoteUrlInput(curUrl) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay show';
+    ov.style.zIndex = 500;
+    ov.innerHTML = `<div class="modal confirm-modal">
+      <h2>${curUrl ? '修改远端地址' : '连接远端仓库'}</h2>
+      <p style="margin-bottom:8px">远端仓库 URL（origin）：</p>
+      <input type="text" id="gitRemoteUrlInput" placeholder="例如：https://github.com/user/repo.git" value="${curUrl ? escapeHtml(curUrl) : ''}"
+        style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:13px" />
+      <p style="margin:8px 0 0;font-size:11px;color:#86909c;line-height:1.5">保存后即可推送/拉取；若 URL 中包含账号凭证，将明文写入 .git/config。</p>
+      <div class="modal-actions">
+        <button class="cancel" id="gitRemoteCancel">取消</button>
+        <button class="save" id="gitRemoteOk">保存</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    const input = ov.querySelector('#gitRemoteUrlInput');
+    input.focus();
+    if (curUrl) input.select();
+    const done = (val) => { ov.remove(); resolve(val); };
+    ov.querySelector('#gitRemoteOk').onclick = () => done(input.value.trim() || null);
+    ov.querySelector('#gitRemoteCancel').onclick = () => done(null);
+    ov.onclick = (e) => { if (e.target === ov) done(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') done(input.value.trim() || null);
+      if (e.key === 'Escape') done(null);
+    });
+  });
+}
+
 // 提交历史：拉一次缓存渲染
 async function loadGitLog() {
   const el = document.getElementById('gitLogList');
@@ -3939,7 +4303,6 @@ async function execGitContextAction(act) {
   try {
     const data = await gitFetch('undo-commit', { method: 'POST' });
     if (!data.ok) { showToast('撤回失败', 'error'); return; }
-    showToast('已撤回', 'info');
     gitLogCache = [];
     await loadGitStatus();
   } catch (e) {
@@ -4059,10 +4422,17 @@ function closeGitDiffModal() {
   document.getElementById('gitDiffOverlay').classList.remove('show');
 }
 
-// ---------- 文件内容查看模态框（只读） ----------
+// ---------- 文件编辑器窗口（多 tab + 行内编辑） ----------
 // 文件抽屉点击文件行弹出：highlight.js 语法高亮 + 行号；
 // 窗口可拖动（标题栏）、可缩放（八方向边角手柄）、双击标题栏还原默认大小与位置。
 // 拖动/缩放都用 pointer events 并 setPointerCapture，保证指针移出窗口后仍持续生效。
+// 多 tab：每打开一个文件一个 tab（tab 显示文件名、悬浮完整路径、未保存圆点）；
+// 内容/编辑态按 tab 缓存在内存（不持久化，关完即忘）。窗口可"收起"（隐藏但 tab 保留），
+// 由活动栏的编辑器按钮唤回；全部 tab 关闭后按钮隐藏。
+// 非模态：背景不再遮罩变暗，窗口外区域照常点击（overlay 透明 + pointer-events:none）。
+// 编辑：常态即编辑态——code 恒 contenteditable，行号用 CSS counter 自动编号（随增删行重算）；
+// Ctrl+S 保存；服务端按 mtime 做冲突检测，冲突时提示重新加载或覆盖。
+// 最小化/关闭：标题栏 — 为最小化（tab 保留）；关闭只走 tab 上的 ×，全部关完窗口消失。
 
 const FILE_VIEW_DEFAULT = { width: 860, height: 620 };  // 默认尺寸（还原用）
 const FILE_VIEW_MIN = { width: 360, height: 220 };      // 缩放下限
@@ -4070,7 +4440,18 @@ let fileViewDrag = null;  // 进行中的拖动/缩放会话：{ mode:'move'|'rz
 let fileViewMaxed = false;          // 最大化态：toggleFileViewMax 置位
 let fileViewPreMaxRect = null;      // 最大化前的窗口 rect（还原图标用）
 
+// tab 模型：fvTabs = Map(sub -> tab)，fvActiveSub = 当前激活 tab 的 sub（null 无）。
+// tab = { sub, projectId, content, mtime, dirty, scrollTop, scrollLeft,
+//         history, hIndex, savedContent }  // 撤销栈：快照数组 + 当前指针 + 磁盘基线（脏标记基准）
+// key 用 sub：同一文件全局唯一 tab（跨项目同路径极罕见，且项目 id 变化时旧 tab 已失配）。
+const fvTabs = new Map();
+let fvActiveSub = null;
+// 首次打开窗口时居中一次，之后拖动/缩放自由摆放；收起再打开不清位置
+let fvEverOpened = false;
+
 function fileViewModal() { return document.getElementById('fileViewModal'); }
+function fvCodeEl() { return document.getElementById('fileViewCode'); }
+function fvPreEl() { return document.getElementById('fileViewPre'); }
 
 // 按扩展名映射 highlight.js 语言 id（不认识的扩展名返回 null，走 autoHighlight 按内容猜）
 const FILE_VIEW_LANG_MAP = {
@@ -4085,41 +4466,365 @@ const FILE_VIEW_LANG_MAP = {
   cs: 'csharp', swift: 'swift', dart: 'dart', scala: 'scala',
   sh: 'bash', bash: 'bash', zsh: 'bash', bat: 'dos', cmd: 'dos', ps1: 'powershell',
   yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini', properties: 'ini',
-  sql: 'sql', lua: 'lua', pl: 'perl', r: 'r', groovy: 'groovy', gradle: 'groovy',
+  sql: 'sql', lua: 'lua', pl: 'perl', r: 'r', groovy: 'groovy', gradle: 'gradle',
   txt: 'plaintext', log: 'plaintext',
 };
 
-// ---------- 开关与内容渲染 ----------
+// ---------- 打开 / 切换 / 关闭 ----------
 
+// 打开（或聚焦已打开的）文件 tab。sub 为相对项目根的路径。
 async function openFileViewer(sub) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   if (!proj) return;
-  const overlay = document.getElementById('fileViewOverlay');
+  // 已有该文件的 tab：直接激活并显示窗口
+  const existing = fvTabs.get(sub);
+  if (existing && existing.projectId === proj.id) {
+    setActiveFvTab(sub);
+    showFileViewWindow();
+    return;
+  }
+  // 新 tab：先显示 loading 占位（history[0] 在内容加载完成后作为初始快照压入）
+  const tab = { sub, projectId: proj.id, content: '', mtime: null, dirty: false, scrollTop: 0, scrollLeft: 0, history: [], hIndex: -1, savedContent: null };
+  fvTabs.set(sub, tab);
+  fvActiveSub = sub;
+  showFileViewWindow();
+  renderFvTabbar();
   const loading = document.getElementById('fileViewLoading');
   const notice = document.getElementById('fileViewNotice');
-  const pre = document.getElementById('fileViewPre');
+  const pre = fvPreEl();
   document.getElementById('fileViewTitle').textContent = sub;
   loading.style.display = ''; loading.textContent = '加载中…';
   notice.style.display = 'none'; pre.style.display = 'none';
-  overlay.classList.add('show');
-  // 每次打开都还原到默认位置尺寸：居中一次，之后拖动/缩放自由摆放
-  resetFileViewSize();
   try {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(sub)}`);
     const data = await resp.json();
-    // 可能等待期间用户已关闭，不再写 DOM
-    if (!overlay.classList.contains('show')) return;
-    if (!data.ok) { showFileViewNotice(data.msg || '读取文件失败'); return; }
-    if (data.tooLarge) { showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); return; }
-    if (data.isBinary) { showFileViewNotice('二进制文件，暂不支持查看'); return; }
-    renderFileViewContent(data.content || '', sub);
+    // 等待期间用户可能已切走/关闭该 tab：不再写入
+    if (fvActiveSub !== sub || !fvTabs.has(sub)) return;
+    if (!data.ok) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice(data.msg || '读取文件失败'); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    if (data.tooLarge) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    if (data.isBinary) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice('二进制文件，暂不支持查看'); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    tab.content = data.content || '';
+    tab.mtime = typeof data.mtime === 'number' ? data.mtime : null;
+    // 撤销栈初始化：磁盘内容为 0 号快照与脏标记基线
+    tab.history = [tab.content];
+    tab.hIndex = 0;
+    tab.savedContent = tab.content;
+    renderFvTabbar();
+    renderActiveFvTab();
+    // 打开即编辑：聚焦编辑区（常态即编辑态，code 恒 contenteditable）
+    fvCodeEl().focus();
   } catch (e) {
-    if (overlay.classList.contains('show')) showFileViewNotice('读取失败: ' + e.message);
+    if (fvActiveSub !== sub || !fvTabs.has(sub)) return;
+    fvTabs.delete(sub); fvActiveSub = null;
+    showFileViewNotice('读取失败: ' + e.message);
+    renderFvTabbar(); syncEditorActivityBtn();
   }
 }
 
-function closeFileViewer() {
-  document.getElementById('fileViewOverlay').classList.remove('show');
+// 显示/唤回编辑器窗口（tab 仍在）
+function showFileViewWindow() {
+  const overlay = document.getElementById('fileViewOverlay');
+  overlay.classList.remove('hidden-win');
+  overlay.classList.add('show');
+  if (!fvEverOpened) { resetFileViewSize(); fvEverOpened = true; }
+  syncEditorActivityBtn();
+}
+
+// 收起窗口（tab 保留，活动栏编辑器按钮可唤回）
+function hideFileViewWindow() {
+  const overlay = document.getElementById('fileViewOverlay');
+  overlay.classList.remove('show');
+  overlay.classList.add('hidden-win');
+  syncEditorActivityBtn();
+}
+
+// 活动栏编辑器按钮：切换窗口显示/收起（tab 保留）
+function toggleFileViewWindow() {
+  const overlay = document.getElementById('fileViewOverlay');
+  if (overlay.classList.contains('show')) hideFileViewWindow();
+  else showFileViewWindow();
+}
+
+// 活动栏「文件编辑」按钮：只有打开过文件（有 tab）才显示；窗口可见时高亮
+function syncEditorActivityBtn() {
+  const btn = document.getElementById('activityEditorBtn');
+  if (!btn) return;
+  btn.style.display = fvTabs.size ? '' : 'none';
+  const overlay = document.getElementById('fileViewOverlay');
+  btn.classList.toggle('active', overlay.classList.contains('show'));
+}
+
+// 关闭单个 tab。有未保存改动先确认；全部关完后窗口消失、活动栏按钮隐藏。
+async function closeFvTab(sub, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const tab = fvTabs.get(sub);
+  if (!tab) return;
+  if (tab.dirty) {
+    const ok = await showConfirm(`「${sub}」有未保存的修改，关闭后将丢失。`, '放弃未保存的修改？');
+    if (!ok) return;
+  }
+  // 关闭前把该 tab 若是激活 tab，其 DOM 内容已随 stash 保留——但这里直接丢弃（已确认过未保存丢失）
+  if (fvActiveSub === sub) stashActiveFvTab();
+  // 计算后继 tab：优先被关 tab 右侧，无右侧则取左侧（插入序 = tab 序）
+  const keys = [...fvTabs.keys()];
+  const idx = keys.indexOf(sub);
+  fvTabs.delete(sub);
+  if (fvActiveSub === sub) {
+    const rest = keys.filter(k => k !== sub);
+    fvActiveSub = rest.length ? rest[Math.min(idx, rest.length - 1)] : null;
+  }
+  renderFvTabbar();
+  if (fvActiveSub) {
+    // 还有剩余 tab：只切内容，窗口保持现状（不收起不关闭）
+    renderActiveFvTab();
+  } else {
+    // 全部关闭：窗口消失，活动栏按钮隐藏
+    fvEverOpened = false;
+    const overlay = document.getElementById('fileViewOverlay');
+    overlay.classList.remove('show');
+    overlay.classList.remove('hidden-win');
+  }
+  syncEditorActivityBtn();
+}
+
+function setActiveFvTab(sub) {
+  if (!fvTabs.has(sub)) return;
+  // 离开旧 tab：把 DOM 实时内容与滚动位置存回缓存
+  stashActiveFvTab();
+  fvActiveSub = sub;
+  renderFvTabbar();
+  renderActiveFvTab();
+}
+
+// ---------- 渲染 ----------
+
+// tab 栏渲染：tab 只显示文件名（title=完整路径），脏标记圆点 + 关闭钮
+function renderFvTabbar() {
+  const bar = document.getElementById('fvTabbar');
+  if (!bar) return;
+  bar.classList.toggle('has-tabs', fvTabs.size > 0);
+  const parts = [];
+  for (const [sub, tab] of fvTabs) {
+    const name = sub.split('/').pop();
+    const active = sub === fvActiveSub;
+    parts.push(`<div class="fv-tab ${active ? 'active' : ''} ${tab.dirty ? 'dirty' : ''}" data-sub="${escapeHtml(sub)}" title="${escapeHtml(sub)}" onclick="setActiveFvTab(this.dataset.sub)" oncontextmenu="event.preventDefault(); showFvTabContextMenu(event, this.dataset.sub)">`
+      + `<span class="fv-tab-dirty"></span>`
+      + `<span class="fv-tab-name">${escapeHtml(name)}</span>`
+      + `<span class="fv-tab-close" title="关闭" onclick="closeFvTab(this.parentElement.dataset.sub, event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>`
+      + `</div>`);
+  }
+  bar.innerHTML = parts.join('');
+  // 标题与按钮态跟随激活 tab；无 tab 时只重置按钮
+  syncFileViewToolbar();
+}
+
+// 标题栏按钮/标题按当前 tab 状态同步（保存钮：有脏改动时显示；刷新钮：有 tab 时显示）
+function syncFileViewToolbar() {
+  const title = document.getElementById('fileViewTitle');
+  const saveBtn = document.getElementById('fileViewSaveBtn');
+  const reloadBtn = document.getElementById('fileViewReloadBtn');
+  const tab = fvTabs.get(fvActiveSub);
+  const proj = tab ? projects.find(x => x.id === tab.projectId) : null;
+  const fullSub = tab && proj ? `${proj.name} / ${tab.sub}` : (tab ? tab.sub : '文件');
+  title.textContent = fullSub;
+  title.title = fullSub;
+  saveBtn.style.display = (tab && tab.dirty) ? '' : 'none';
+  reloadBtn.style.display = tab ? '' : 'none';
+}
+
+// 重新加载当前 tab：丢弃本地内容（含未保存修改），从磁盘重读。
+// 本地有未保存修改先确认；撤销栈随重载重建（磁盘内容为新基线）。
+async function reloadFileViewActive() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab) return;
+  if (tab.dirty) {
+    const ok = await showConfirm(`「${tab.sub}」有未保存的修改，重新加载后将丢失。`, '放弃未保存的修改？');
+    if (!ok) return;
+  }
+  const proj = projects.find(x => x.id === tab.projectId);
+  if (!proj) { showToast('项目不存在，无法重新加载', 'error'); return; }
+  const loading = document.getElementById('fileViewLoading');
+  const notice = document.getElementById('fileViewNotice');
+  const pre = fvPreEl();
+  loading.style.display = ''; loading.textContent = '加载中…';
+  notice.style.display = 'none'; pre.style.display = 'none';
+  try {
+    const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`);
+    const data = await resp.json();
+    // 等待期间用户可能已切走/关闭该 tab：不再写入
+    if (fvActiveSub !== tab.sub || !fvTabs.has(tab.sub)) return;
+    if (!data.ok) { showFileViewNotice(data.msg || '读取文件失败'); return; }
+    if (data.tooLarge) { showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); return; }
+    if (data.isBinary) { showFileViewNotice('二进制文件，暂不支持查看'); return; }
+    tab.content = data.content || '';
+    tab.mtime = typeof data.mtime === 'number' ? data.mtime : null;
+    tab.dirty = false;
+    // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈
+    tab.history = [tab.content];
+    tab.hIndex = 0;
+    tab.savedContent = tab.content;
+    tab.scrollTop = 0;
+    tab.scrollLeft = 0;
+    syncFileViewToolbar();
+    renderActiveFvTab();
+    fvCodeEl().focus();
+  } catch (e) {
+    if (fvActiveSub !== tab.sub || !fvTabs.has(tab.sub)) return;
+    showFileViewNotice('读取失败: ' + e.message);
+  }
+}
+
+// ---------- tab 拖动排序 ----------
+// pointer 会话模型：按下记录起点 tab，移动超 5px 才算拖动（与点击切换区分）；
+// 移动中按指针在 tab 栏的 x 计算落点，实时把被拖 tab 的 DOM 移到落点（视觉即拖即换位）；
+// 抬起时按 DOM 顺序重排 fvTabs（Map 重建，插入序 = 新序）。fvTabs 是渲染顺序的唯一来源。
+let fvTabDrag = null; // { sub, pointerId, startX, moved }
+
+function fvReorderFromDom() {
+  const bar = document.getElementById('fvTabbar');
+  const order = [...bar.querySelectorAll('.fv-tab')].map(el => el.dataset.sub);
+  const next = new Map();
+  for (const sub of order) { const t = fvTabs.get(sub); if (t) next.set(sub, t); }
+  // 防御：DOM 顺序异常时保持原序（不该发生）
+  if (next.size === fvTabs.size) {
+    fvTabs.clear();
+    for (const [k, v] of next) fvTabs.set(k, v);
+  }
+}
+
+function initFvTabDrag() {
+  const bar = document.getElementById('fvTabbar');
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const tabEl = e.target.closest('.fv-tab');
+    if (!tabEl) return;
+    // 关闭钮上按下不进入拖动会话
+    if (e.target.closest('.fv-tab-close')) return;
+    fvTabDrag = { sub: tabEl.dataset.sub, pointerId: e.pointerId, startX: e.clientX, moved: false };
+    bar.setPointerCapture(e.pointerId);
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!fvTabDrag || e.pointerId !== fvTabDrag.pointerId) return;
+    if (!fvTabDrag.moved && Math.abs(e.clientX - fvTabDrag.startX) < 5) return;
+    fvTabDrag.moved = true;
+    const tabEl = bar.querySelector(`.fv-tab[data-sub="${CSS.escape(fvTabDrag.sub)}"]`);
+    if (!tabEl) return;
+    tabEl.classList.add('dragging');
+    // 落点：指针下方是哪个 tab——拖到它前/后取决于指针在其左半还是右半
+    const target = [...bar.querySelectorAll('.fv-tab:not(.dragging)')]
+      .find(el => { const r = el.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right; });
+    if (target) {
+      const r = target.getBoundingClientRect();
+      const before = e.clientX < r.left + r.width / 2;
+      bar.insertBefore(tabEl, before ? target : target.nextSibling);
+    } else if (e.clientX > (bar.lastElementChild ? bar.lastElementChild.getBoundingClientRect().right : 0)) {
+      // 指针越过末尾：拖到最后
+      bar.appendChild(tabEl);
+    }
+  });
+  const end = (e) => {
+    if (!fvTabDrag || e.pointerId !== fvTabDrag.pointerId) return;
+    const moved = fvTabDrag.moved;
+    const sub = fvTabDrag.sub;
+    fvTabDrag = null;
+    if (moved) {
+      fvReorderFromDom();
+      renderFvTabbar(); // 重渲消除 dragging 类并统一结构
+    }
+    // 未拖动 = 单击：走激活逻辑（这里手动触发，onclick 在拖动会话被 pointer capture 吞掉）
+    if (!moved && fvTabs.has(sub)) setActiveFvTab(sub);
+  };
+  bar.addEventListener('pointerup', end);
+  bar.addEventListener('pointercancel', end);
+}
+
+// ---------- tab 右键菜单 ----------
+let fvTabMenuSub = null; // 菜单作用的 tab
+
+function showFvTabContextMenu(event, sub) {
+  fvTabMenuSub = sub;
+  const menu = document.getElementById('fvTabContextMenu');
+  const x = Math.min(event.clientX, window.innerWidth - 180);
+  const y = Math.min(event.clientY, window.innerHeight - 190);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+}
+function hideFvTabContextMenu() {
+  document.getElementById('fvTabContextMenu').classList.remove('show');
+}
+
+// 关闭组动作：close 左右边界/其他/全部。带确认的关闭走 closeFvTab（内部确认脏改动）。
+async function execFvTabContextAction(act) {
+  const sub = fvTabMenuSub;
+  hideFvTabContextMenu();
+  if (!sub || !fvTabs.has(sub)) return;
+  const keys = [...fvTabs.keys()];
+  const idx = keys.indexOf(sub);
+  // 待关集合：过滤掉当前激活 tab？不——编辑器习惯是激活 tab 也关，关后自动切后继
+  let targets = [];
+  if (act === 'close') targets = [sub];
+  else if (act === 'close-left') targets = keys.slice(0, idx);
+  else if (act === 'close-right') targets = keys.slice(idx + 1);
+  else if (act === 'close-others') targets = keys.filter(k => k !== sub);
+  else if (act === 'close-all') targets = keys;
+  if (!targets.length) return;
+  // 脏 tab 统一确认一次（列出文件名），确认后全部丢弃
+  const dirty = targets.map(k => fvTabs.get(k)).filter(t => t.dirty);
+  if (dirty.length) {
+    const names = dirty.map(t => t.sub.split('/').pop()).join('、');
+    const ok = await showConfirm(`以下文件有未保存的修改，关闭后将丢失：\n${names}`, '放弃未保存的修改？');
+    if (!ok) return;
+  }
+  for (const k of targets) fvTabs.delete(k);
+  if (act === 'close' || !fvTabs.has(fvActiveSub)) {
+    // 关的是激活 tab（或激活 tab 在被关集合里）：切后继
+    if (fvTabs.size) {
+      const rest = keys.filter(k => fvTabs.has(k));
+      // close：右侧优先；批量关闭：剩什么用什么（保持剩余里原来的位置）
+      fvActiveSub = rest.length ? rest[act === 'close' ? Math.min(idx, rest.length - 1) : 0] : null;
+    } else {
+      fvActiveSub = null;
+    }
+  }
+  renderFvTabbar();
+  if (fvActiveSub) renderActiveFvTab();
+  else {
+    fvEverOpened = false;
+    const overlay = document.getElementById('fileViewOverlay');
+    overlay.classList.remove('show');
+    overlay.classList.remove('hidden-win');
+  }
+  syncEditorActivityBtn();
+}
+
+// tab 右键菜单事件绑定（mousedown 执行，与文件树菜单一致）+ 点别处/ESC 关闭
+(function initFvTabContextMenu() {
+  const menu = document.getElementById('fvTabContextMenu');
+  menu.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); execFvTabContextAction(b.dataset.act); });
+  });
+  document.addEventListener('click', hideFvTabContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('#fvTabContextMenu') && !e.target.closest('.fv-tab')) hideFvTabContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideFvTabContextMenu(); });
+  window.addEventListener('blur', hideFvTabContextMenu);
+  initFvTabDrag();
+})();
+
+// 渲染当前激活 tab 的内容到窗口（loading/notice 让位）。始终为编辑态渲染。
+function renderActiveFvTab() {
+  const tab = fvTabs.get(fvActiveSub);
+  const loading = document.getElementById('fileViewLoading');
+  const notice = document.getElementById('fileViewNotice');
+  const pre = fvPreEl();
+  if (!tab) { loading.style.display = 'none'; notice.style.display = 'none'; pre.style.display = 'none'; return; }
+  const proj = projects.find(x => x.id === tab.projectId);
+  document.getElementById('fileViewTitle').textContent = proj ? `${proj.name} / ${tab.sub}` : tab.sub;
+  renderFileViewContent(tab.content, tab.sub);
+  pre.scrollTop = tab.scrollTop || 0;
+  pre.scrollLeft = tab.scrollLeft || 0;
 }
 
 // 大文件 / 二进制 / 错误的统一提示态
@@ -4128,7 +4833,7 @@ function showFileViewNotice(msg) {
   const notice = document.getElementById('fileViewNotice');
   notice.textContent = msg;
   notice.style.display = '';
-  document.getElementById('fileViewPre').style.display = 'none';
+  fvPreEl().style.display = 'none';
 }
 
 function fmtFileViewSize(n) {
@@ -4137,36 +4842,252 @@ function fmtFileViewSize(n) {
   return n + ' B';
 }
 
-// 高亮渲染：按 \n 切行，每行独立 hljs 高亮 + 行号列（.fv-ln sticky 左固定）。
-// 不整段 highlight 再切行的原因：hljs 输出的 span 会跨行，按行切开必然产生破碎标签；
-// 逐行调用的代价是块级结构（多行注释/模板字符串）后续行不着色——对查看场景可接受，
-// 换来正确的行号与滚动性能。
+// 渲染编辑区：gutter 行号 + code 高亮。
+// 行号放独立 gutter（code 兄弟元素，不在 contenteditable 内，innerText 读不到——
+// 此前的方案把行号 span 混在行内容里，切 tab 时 innerText 回读会把行号叠进文件内容，
+// 表现为内容随切换不断膨胀）。高亮按行切：hljs 的 span 会跨行，整段切行必产生破碎标签；
+// 逐行高亮的代价是块级结构（多行注释/模板字符串）后续行不着色，编辑器场景可接受。
+// 编辑过程中不重渲（contenteditable 重排破坏光标），只 debounce 刷 gutter 行数。
 function renderFileViewContent(code, sub) {
   document.getElementById('fileViewLoading').style.display = 'none';
   document.getElementById('fileViewNotice').style.display = 'none';
-  const pre = document.getElementById('fileViewPre');
-  const codeEl = document.getElementById('fileViewCode');
+  const pre = fvPreEl();
+  const codeEl = fvCodeEl();
+  const lines = code.split('\n');
+  // gutter：1..n 每行一个数字（white-space:pre 直接按 \n 拼比逐 span 拼 DOM 快）
+  const nums = [];
+  for (let i = 1; i <= lines.length; i++) nums.push(i);
+  document.getElementById('fvGutter').textContent = nums.join('\n');
   const ext = (sub.split('.').pop() || '').toLowerCase();
   const lang = FILE_VIEW_LANG_MAP[ext];
   const canHi = (l) => window.hljs && lang && lang !== 'plaintext' && hljs.getLanguage(lang);
-  const lines = code.split('\n');
   const parts = [];
   try {
     for (let i = 0; i < lines.length; i++) {
       const lineHtml = canHi(lines[i])
         ? hljs.highlight(lines[i], { language: lang, ignoreIllegals: true }).value
         : escapeHtml(lines[i]);
-      // 行是 display:block 的 span，行与行之间不能再拼 '\n'——code 是 white-space:pre，
-      // 拼进去的换行符会额外生成空行盒，视觉上就是行距翻倍
-      parts.push(`<span class="fv-line"><span class="fv-ln">${i + 1}</span>${lineHtml || '\n'}</span>`);
+      // 行尾拼 '\n' 分隔（white-space:pre 下换行符即换行），空行也要保留分隔符
+      parts.push(lineHtml + '\n');
     }
     codeEl.innerHTML = parts.join('');
   } catch (_) {
-    codeEl.innerHTML = escapeHtml(code);
+    codeEl.textContent = code;
   }
   pre.style.display = '';
-  pre.scrollTop = 0; pre.scrollLeft = 0;
 }
+
+// ---------- 编辑与保存 ----------
+// 常态即编辑态：code 恒为 contenteditable，无查看/编辑两态切换。
+// 高亮只在打开/保存/重载时渲染一次（按行 .fv-line 结构 + CSS counter 行号）；
+// 编辑过程中不再重高亮（contenteditable 下重排会破坏光标），保存后拿新内容重渲刷新高亮。
+
+// DOM 实时内容写回 tab 缓存（切 tab/收起窗口/保存前调用）。
+// 切走前把未落栈的输入强制打点——撤销栈跨切 tab 保留，切回来还能继续撤。
+function stashActiveFvTab() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab) return;
+  fvPushHistory(tab, true);
+  tab.content = fvCodeEl().innerText.replace(/\n$/, '');
+  const pre = fvPreEl();
+  tab.scrollTop = pre.scrollTop;
+  tab.scrollLeft = pre.scrollLeft;
+}
+
+// 编辑时监听输入标脏（input 事件覆盖键入/粘贴/拖放）
+function fvMarkDirty() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab) return;
+  if (!tab.dirty) {
+    tab.dirty = true;
+    renderFvTabbar();
+  }
+  scheduleFvGutterRefresh();
+}
+
+// gutter 行数刷新：编辑中增删行后同步行号（重渲整段会破坏光标，这里只改 gutter 文本）。
+// debounce 到输入停 150ms 后执行，避免每次击键都读写 DOM。
+let fvGutterTimer = null;
+function scheduleFvGutterRefresh() {
+  if (fvGutterTimer) clearTimeout(fvGutterTimer);
+  fvGutterTimer = setTimeout(() => {
+    fvGutterTimer = null;
+    if (!fvTabs.has(fvActiveSub)) return;
+    const n = fvCodeEl().innerText.split('\n').length;
+    const nums = [];
+    for (let i = 1; i <= n; i++) nums.push(i);
+    document.getElementById('fvGutter').textContent = nums.join('\n');
+  }, 150);
+}
+
+// ---------- 撤销 / 重做（Ctrl+Z / Ctrl+Y，跨切 tab 与保存） ----------
+// contenteditable 的原生撤销栈会被 renderFileViewContent 的 innerHTML 重建清空
+// （切 tab/保存/重载后撤不了），所以自建快照栈挂在 tab 上：
+//   history[] 快照数组、hIndex 当前位置、savedContent 磁盘基线（脏 = 当前内容 ≠ 基线）。
+// 打点策略：输入停 400ms 打一次快照（连续击键算一步），切 tab/保存前强制打点。
+// 撤销/重做替换 code 文本后原生栈已失效，直接清 contentEditable（浏览器不再自己记）。
+const FV_HISTORY_LIMIT = 200; // 每文件最多 200 个快照（单快照上限 2MB，极端内存 ~400MB 可接受，超限丢最旧）
+
+function fvPushHistory(tab, force) {
+  if (!tab) return;
+  const text = fvCodeEl().innerText.replace(/\n$/, '');
+  if (text === tab.history[tab.hIndex]) return; // 内容没变不重复打点
+  if (!force && fvHistoryTimer) return;          // debounce 中且非强制：交给定时器
+  clearTimeout(fvHistoryTimer);
+  fvHistoryTimer = null;
+  // 截断撤销点之后的重做分支（编辑器标准语义）
+  tab.history = tab.history.slice(0, tab.hIndex + 1);
+  tab.history.push(text);
+  if (tab.history.length > FV_HISTORY_LIMIT) tab.history.shift();
+  tab.hIndex = tab.history.length - 1;
+}
+
+let fvHistoryTimer = null;
+function scheduleFvHistoryPush() {
+  if (fvHistoryTimer) clearTimeout(fvHistoryTimer);
+  fvHistoryTimer = setTimeout(() => {
+    fvHistoryTimer = null;
+    fvPushHistory(fvTabs.get(fvActiveSub), true);
+  }, 400);
+}
+
+// 恢复快照到编辑区：替换文本 + 刷 gutter + 派生脏标（与磁盘基线比）+ 滚动回原位
+function fvRestoreSnapshot(tab, text) {
+  const pre = fvPreEl();
+  const codeEl = fvCodeEl();
+  const scrollTop = pre.scrollTop;
+  codeEl.textContent = text;
+  tab.content = text;
+  // 脏标按磁盘基线重算（撤销回基线 = 不脏，可再撤销回更早）
+  tab.dirty = text !== tab.savedContent;
+  const nums = [];
+  for (let i = 1; i <= text.split('\n').length; i++) nums.push(i);
+  document.getElementById('fvGutter').textContent = nums.join('\n');
+  renderFvTabbar();
+  pre.scrollTop = scrollTop;
+}
+
+function undoFvEdit() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab || tab.hIndex <= 0) return;
+  // 先把编辑区当前实时内容打点（上次 debounce 还没落栈的输入），再后退
+  fvPushHistory(tab, true);
+  if (tab.hIndex <= 0) return;
+  tab.hIndex--;
+  fvRestoreSnapshot(tab, tab.history[tab.hIndex]);
+  fvCodeEl().focus();
+}
+
+function redoFvEdit() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab || tab.hIndex >= tab.history.length - 1) return;
+  fvPushHistory(tab, true);
+  if (tab.hIndex >= tab.history.length - 1) return;
+  tab.hIndex++;
+  fvRestoreSnapshot(tab, tab.history[tab.hIndex]);
+  fvCodeEl().focus();
+}
+
+// 保存当前 tab：取 DOM 实时文本。冲突（mtime 不一致）时提示重新加载或覆盖。
+async function saveFileViewActive() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab) return;
+  const proj = projects.find(x => x.id === tab.projectId);
+  if (!proj) { showToast('项目不存在，无法保存', 'error'); return; }
+  stashActiveFvTab();
+  const saveOnce = async (force) => {
+    const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: tab.content, mtime: force ? null : tab.mtime }),
+    });
+    return resp.json();
+  };
+  try {
+    const data = await saveOnce(false);
+    if (data.conflict) {
+      const reload = await showConfirm(
+        `「${tab.sub}」在磁盘上已被外部修改。点「确定」丢弃本地修改并重新加载；点「取消」保持本地内容（可再次点保存选择覆盖）。`,
+        '文件已被外部修改',
+      );
+      if (reload) {
+        const resp2 = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`);
+        const data2 = await resp2.json();
+        if (data2.ok) {
+          tab.content = data2.content || '';
+          tab.mtime = data2.mtime;
+          tab.dirty = false;
+          // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈
+          tab.history = [tab.content];
+          tab.hIndex = 0;
+          tab.savedContent = tab.content;
+          renderFileViewContent(tab.content, tab.sub);
+          renderFvTabbar();
+        } else {
+          showToast(data2.msg || '重新加载失败', 'error');
+        }
+      }
+      return;
+    }
+    if (!data.ok) { showToast(data.msg || '保存失败', 'error'); return; }
+    tab.mtime = typeof data.mtime === 'number' ? data.mtime : tab.mtime;
+    tab.dirty = false;
+    tab.savedContent = tab.content; // 新磁盘基线（脏标按此派生，撤销仍可回退）
+    // 保存后用新内容重渲（刷新高亮与行号），保留滚动位置
+    renderFileViewContent(tab.content, tab.sub);
+    renderFvTabbar();
+    refreshFileTreeCacheForSave(proj.id);
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+// 保存成功后刷新文件树缓存（保持条目 size/顺序新鲜），树未打开则只清缓存
+function refreshFileTreeCacheForSave(projectId) {
+  if (fileDrawerProjectId === projectId) {
+    loadFileDirIntoCache.currentRoot = null;
+    if (sideDrawerPanel === 'file') {
+      const sel = fileTreeSelected;
+      loadFileDir('', true).then(() => {
+        if (sel && fileTreeExpanded.has(parentDirOf(sel))) loadFileDir(parentDirOf(sel), true).then(() => renderFileTree());
+        else renderFileTree();
+      });
+    } else {
+      if (renderFileTree.cache) renderFileTree.cache = new Map();
+    }
+  }
+}
+
+function parentDirOf(sub) {
+  const i = sub.lastIndexOf('/');
+  return i >= 0 ? sub.slice(0, i) : '';
+}
+
+// Ctrl+S 保存；Ctrl+Z / Ctrl+Y（含 Ctrl+Shift+Z）撤销/重做。
+// 撤销/重做只在编辑器窗口可见且焦点不在输入框外元素时拦截（避免劫持其它面板快捷键）。
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('fileViewOverlay');
+  const editorVisible = overlay.classList.contains('show') && fvTabs.has(fvActiveSub);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (editorVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      saveFileViewActive();
+    }
+    return;
+  }
+  if (!editorVisible) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.shiftKey) redoFvEdit(); else undoFvEdit();
+  } else if (mod && e.key.toLowerCase() === 'y') {
+    e.preventDefault();
+    e.stopPropagation();
+    redoFvEdit();
+  }
+});
 
 // ---------- 拖动与缩放 ----------
 // 统一 pointer 会话模型：pointerdown 记录起点与窗口原 rect；pointermove 按 mode 计算新 rect；
@@ -4296,6 +5217,9 @@ function fileViewTitlebarDblClick(e) {
   const titlebar = document.getElementById('fileViewTitlebar');
   titlebar.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.file-view-tb-btn')) return;
+    // 编辑态点标题栏拖动：先失焦避免拖动误选文本（不退出编辑态）
+    const codeEl = fvCodeEl();
+    if (codeEl && codeEl.isContentEditable) codeEl.blur();
     // 最大化态拖标题栏：先还原回最大化前的 rect，再从还原后的位置继续拖（标准窗口行为）
     if (fileViewMaxed) toggleFileViewMax();
     beginFileViewDrag(e, 'move');
@@ -4307,17 +5231,23 @@ function fileViewTitlebarDblClick(e) {
   m.addEventListener('pointermove', moveFileViewDrag);
   m.addEventListener('pointerup', endFileViewDrag);
   m.addEventListener('pointercancel', endFileViewDrag);
-  // Esc 关闭（窗口打开时优先于其它 Esc 处理）
+  // 编辑输入标脏 + debounce 刷行号 + debounce 打撤销快照
+  fvCodeEl().addEventListener('input', () => {
+    fvMarkDirty();
+    scheduleFvHistoryPush();
+  });
+  // Esc：最小化窗口（tab 保留；关闭走 tab 上的 ×）
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.getElementById('fileViewOverlay').classList.contains('show')) {
       e.stopPropagation();
-      closeFileViewer();
+      hideFileViewWindow();
     }
   });
 })();
 
-// 启动即应用已保存的字体设置（localStorage，默认 Cascadia Code 13px）
+// 启动：先应用默认字体（立即渲染不闪），再异步从服务端拉取设置并热应用（含 localStorage 一次性迁移）
 applyTermSettings();
+bootSettings();
 // 左侧抽屉：仅还原面板选择与开态（宽度/高亮/互斥显示）；file/git 面板的数据加载
 // 统一推迟到 loadProjects 项目就绪后（见 loadProjects 末尾）——提前打开会因 projects=[]
 // 把已持久化的项目绑定误判为"项目已删除"而清空，导致刷新后文件/Git 面板空白。
@@ -4358,7 +5288,7 @@ loadProjects();
   });
   document.addEventListener('click', hideFileContextMenu);
   document.addEventListener('contextmenu', (e) => {
-    if (!e.target.closest('.file-context-menu') && !e.target.closest('.file-tree-row')) hideFileContextMenu();
+    if (!e.target.closest('.file-context-menu') && !e.target.closest('.file-tree-row') && !e.target.closest('#fileDrawerTree')) hideFileContextMenu();
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideFileContextMenu(); });
   window.addEventListener('blur', hideFileContextMenu);

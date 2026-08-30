@@ -320,3 +320,74 @@ test('undo-commit: 软撤回最新未推送提交（放最后：会伪造 upstre
   git(repoDir, 'branch', '--unset-upstream', 'main');
   git(repoDir, 'update-ref', '-d', 'refs/remotes/origin/main');
 });
+
+// ---------------------------------------------------------------------------
+// git init / remote-url / remote-set：非仓库初始化与远端配置闭环
+// ---------------------------------------------------------------------------
+
+test('init: 非仓库目录 git init 后 status 恢复正常（初始化闭环）', async () => {
+  // 前置：确认当前 notRepo
+  const r0 = await get('/api/projects/norepo/git/status');
+  assert.strictEqual(r0.body.notRepo, true, '初始为非仓库');
+  // init
+  const r = await post('/api/projects/norepo/git/init');
+  assert.strictEqual(r.body.ok, true, 'init 成功');
+  // status 恢复：空仓库、零提交、文件全为 untracked
+  const st = await get('/api/projects/norepo/git/status');
+  assert.strictEqual(st.body.ok, true, 'init 后 status 正常');
+  assert.ok(!st.body.notRepo);
+  assert.strictEqual(st.body.branch, 'master', '默认分支 master（本机 git 默认）');
+  assert.ok(Array.isArray(st.body.files), 'files 为数组（空仓库可为空或含未跟踪文件）');
+});
+
+test('remote-url: 无 origin 时返回 url:null', async () => {
+  // 前置：undo-commit 测试会经 git config 写入 remote.origin.url（非真 remote），先清掉
+  try { git(repoDir, 'config', '--unset', 'remote.origin.url'); } catch (_) {}
+  try { git(repoDir, 'config', '--unset', 'remote.origin.fetch'); } catch (_) {}
+  try { git(repoDir, 'remote', 'remove', 'origin'); } catch (_) {}
+  const r = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(r.body.ok, true);
+  assert.strictEqual(r.body.url, null, 'repo 未配置 origin');
+});
+
+test('remote-set: 首次 add origin，remote-url 回读一致', async () => {
+  const r = await post('/api/projects/repo/git/remote-set', { url: 'https://example.com/yancy/demo.git' });
+  assert.strictEqual(r.body.ok, true);
+  const g = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(g.body.url, 'https://example.com/yancy/demo.git', '回读到新地址');
+  // git 侧真实生效
+  assert.strictEqual(git(repoDir, 'remote', 'get-url', 'origin').trim(), 'https://example.com/yancy/demo.git');
+});
+
+test('remote-set: 已有 origin 时改为 set-url（不报 already exists）', async () => {
+  const r = await post('/api/projects/repo/git/remote-set', { url: 'https://example.com/yancy/demo2.git' });
+  assert.strictEqual(r.body.ok, true, '重复设置走 set-url');
+  const g = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(g.body.url, 'https://example.com/yancy/demo2.git', '地址已更新');
+});
+
+test('remote-set: 空 URL 400', async () => {
+  const r = await post('/api/projects/repo/git/remote-set', { url: '  ' });
+  assert.strictEqual(r.status, 400);
+  assert.strictEqual(r.body.ok, false);
+});
+
+test('remote-set: URL 不经 shell，特殊字符原样保存', async () => {
+  const weird = 'https://user:p@ss w$rd@example.com/x y.git';
+  const r = await post('/api/projects/repo/git/remote-set', { url: weird });
+  assert.strictEqual(r.body.ok, true);
+  const g = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(g.body.url, weird, '特殊字符原样保存');
+});
+
+test('remote-url: 非仓库返回 notRepo（norepo 在 init 前已测，此处对 missing 目录 404）', async () => {
+  const r = await get('/api/projects/missing/git/remote-url');
+  assert.strictEqual(r.status, 404);
+});
+
+// 清理：删掉测试配置的 origin，不污染后续测试运行（repo 目录在 after 中删除，此处防御性清理）
+test('cleanup: 移除 repo 的 origin', async () => {
+  git(repoDir, 'remote', 'remove', 'origin');
+  const g = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(g.body.url, null, 'origin 已清除');
+});
