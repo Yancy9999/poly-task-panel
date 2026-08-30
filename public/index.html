@@ -10,6 +10,9 @@
 <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 <script src="/vendor/xterm/lib/xterm.js"></script>
 <script src="/vendor/xterm-addon-fit/lib/addon-fit.js"></script>
+<!-- highlight.js：文件查看模态框语法高亮（深色主题 github-dark） -->
+<link rel="stylesheet" href="/vendor/hljs/styles/github-dark.min.css">
+<script src="/vendor/hljs/highlight.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2329; height: 100vh; display: flex; flex-direction: column; }
@@ -529,6 +532,41 @@
   .git-empty { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; text-align: center; }
   .git-loading { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; }
   .git-not-repo { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; line-height: 1.8; }
+  /* 文件内容查看模态框（只读）：可拖动/可缩放的"桌面窗口"式弹窗。
+     overlay 不用 flex 居中——窗口位置由 JS 控制（拖动改 left/top，缩放改宽高并保持对边固定）。 */
+  .file-view-overlay { display: none; background: rgba(0,0,0,0.35); z-index: 150; }
+  .file-view-overlay.show { display: block; }
+  .file-view-modal { position: fixed; left: 50%; top: 50%; width: 860px; height: 620px; max-width: none; padding: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: visible; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  /* 标题栏：拖动把手（cursor:move），双击还原默认大小。高度压到一行文本（~24px） */
+  .file-view-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 0 10px; height: 24px; border-bottom: 1px solid #e5e6eb; border-radius: 10px 10px 0 0; cursor: move; user-select: none; flex-shrink: 0; background: #f7f8fa; }
+  /* 用 .modal 前缀抬优先级：否则全局 .modal h2 的 margin-bottom:18px 会盖掉 margin:0，
+     导致标题在 24px 标题栏里贴顶/偏移 */
+  .modal .file-view-title { font-size: 12.5px; margin: 0; line-height: 24px; font-family: Consolas, "Cascadia Code", monospace; font-weight: 600; color: #1f2329; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  .file-view-titlebar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .file-view-tb-btn { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #e5e6eb; background: #fff; color: #4e5969; cursor: pointer; border-radius: 4px; transition: all .12s; flex-shrink: 0; }
+  .file-view-tb-btn svg { width: 12px; height: 12px; display: block; }
+  .file-view-tb-btn:hover { border-color: #165dff; color: #165dff; }
+  .file-view-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 0 0 10px 10px; }
+  .file-view-loading { padding: 30px; text-align: center; color: #86909c; font-size: 13px; font-style: italic; }
+  .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #f7f8fa; border: 1px solid #e5e6eb; border-radius: 8px; color: #4e5969; font-size: 13px; line-height: 1.7; }
+  /* 代码区：行号列 + 高亮代码，pre 内滚动（不用 overlay 滚动，缩放时尺寸跟随窗口） */
+  /* 字体/字号不写死：由 JS 写入（跟随设置面板的终端字体，见 applyTermSettings） */
+  .file-view-pre { flex: 1; min-height: 0; margin: 0; overflow: auto; line-height: 1; tab-size: 4; border-radius: 0 0 10px 10px; background: #0d1117; }
+  .file-view-pre code { display: block; padding: 12px 16px; white-space: pre; }
+  /* 每行一个块级容器：宽随内容（长行撑开，供 pre 横向滚动），min-width 保证短行行号也贴左 */
+  .file-view-pre .fv-line { display: block; width: fit-content; min-width: 100%; }
+  .file-view-pre .fv-ln { display: inline-block; position: sticky; left: 0; min-width: 3.2em; margin-right: 14px; padding-right: 10px; text-align: right; color: #484f58; background: #0d1117; user-select: none; border-right: 1px solid #1c2128; }
+  /* 八方向缩放手柄：贴边透明热区，hover 显紫色描边提示；角上的热区比边大 */
+  .fv-rz { position: absolute; z-index: 10; }
+  .fv-rz-n { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+  .fv-rz-s { bottom: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+  .fv-rz-e { top: 10px; bottom: 10px; right: -4px; width: 8px; cursor: ew-resize; }
+  .fv-rz-w { top: 10px; bottom: 10px; left: -4px; width: 8px; cursor: ew-resize; }
+  .fv-rz-ne { top: -6px; right: -6px; width: 16px; height: 16px; cursor: nesw-resize; }
+  .fv-rz-nw { top: -6px; left: -6px; width: 16px; height: 16px; cursor: nwse-resize; }
+  .fv-rz-se { bottom: -6px; right: -6px; width: 16px; height: 16px; cursor: nwse-resize; }
+  .fv-rz-sw { bottom: -6px; left: -6px; width: 16px; height: 16px; cursor: nesw-resize; }
+  .fv-rz:hover { background: rgba(22,93,255,.15); border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -681,6 +719,35 @@
     <div class="modal-actions">
       <button class="cancel" onclick="closeGitDiffModal()">关闭</button>
     </div>
+  </div>
+</div>
+
+<!-- 文件内容查看模态框（只读）：可拖动（标题栏）、可缩放（八方向边角）、双击标题还原默认。
+     内容由 highlight.js 高亮渲染（深色主题），带行号。大文件/二进制文件给出友好提示。 -->
+<div class="modal-overlay file-view-overlay" id="fileViewOverlay">
+  <div class="modal file-view-modal" id="fileViewModal">
+    <div class="file-view-titlebar" id="fileViewTitlebar">
+      <h2 id="fileViewTitle" class="file-view-title">文件</h2>
+      <div class="file-view-titlebar-actions">
+        <button type="button" class="file-view-tb-btn" id="fileViewRestoreBtn" title="还原默认大小" onclick="resetFileViewSize()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg></button>
+        <button type="button" class="file-view-tb-btn" id="fileViewMaxBtn" title="最大化" onclick="toggleFileViewMax()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></button>
+        <button type="button" class="file-view-tb-btn" title="关闭" onclick="closeFileViewer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+      </div>
+    </div>
+    <div class="file-view-body" id="fileViewBody">
+      <div class="file-view-loading" id="fileViewLoading">加载中…</div>
+      <div class="file-view-notice" id="fileViewNotice" style="display:none"></div>
+      <pre class="file-view-pre hljs" id="fileViewPre" style="display:none"><code id="fileViewCode"></code></pre>
+    </div>
+    <!-- 八方向缩放手柄：n/s/e/w 四边 + ne/nw/se/sw 四角 -->
+    <div class="fv-rz fv-rz-n" data-rz="n"></div>
+    <div class="fv-rz fv-rz-s" data-rz="s"></div>
+    <div class="fv-rz fv-rz-e" data-rz="e"></div>
+    <div class="fv-rz fv-rz-w" data-rz="w"></div>
+    <div class="fv-rz fv-rz-ne" data-rz="ne"></div>
+    <div class="fv-rz fv-rz-nw" data-rz="nw"></div>
+    <div class="fv-rz fv-rz-se" data-rz="se"></div>
+    <div class="fv-rz fv-rz-sw" data-rz="sw"></div>
   </div>
 </div>
 
@@ -2376,6 +2443,12 @@ function applyTermSettings() {
     body.style.fontFamily = fontFamily;
     body.style.fontSize = fontSize + 'px';
   }
+  // 文件查看器跟随同一套终端字体设置
+  const fvPre = document.getElementById('fileViewPre');
+  if (fvPre) {
+    fvPre.style.fontFamily = fontFamily;
+    fvPre.style.fontSize = fontSize + 'px';
+  }
   termSessions.forEach((s) => {
     try { s.term.options.fontFamily = fontFamily; s.term.options.fontSize = fontSize; } catch (e) {}
   });
@@ -3208,7 +3281,7 @@ function onFileRowClick(row) {
   const sub = row.dataset.sub;
   const isDir = row.dataset.isdir === '1';
   fileTreeSelected = sub;
-  if (!isDir) { persistFileDrawerState(); renderFileTree(); return; }
+  if (!isDir) { persistFileDrawerState(); renderFileTree(); openFileViewer(sub); return; }
   // 目录：toggle 展开。展开前需确保已加载子层（缓存命中则直接渲染）
   if (fileTreeExpanded.has(sub)) {
     fileTreeExpanded.delete(sub);
@@ -3977,6 +4050,263 @@ async function showGitDiffModal(query, title) {
 function closeGitDiffModal() {
   document.getElementById('gitDiffOverlay').classList.remove('show');
 }
+
+// ---------- 文件内容查看模态框（只读） ----------
+// 文件抽屉点击文件行弹出：highlight.js 语法高亮 + 行号；
+// 窗口可拖动（标题栏）、可缩放（八方向边角手柄）、双击标题栏还原默认大小与位置。
+// 拖动/缩放都用 pointer events 并 setPointerCapture，保证指针移出窗口后仍持续生效。
+
+const FILE_VIEW_DEFAULT = { width: 860, height: 620 };  // 默认尺寸（还原用）
+const FILE_VIEW_MIN = { width: 360, height: 220 };      // 缩放下限
+let fileViewDrag = null;  // 进行中的拖动/缩放会话：{ mode:'move'|'rz', dir, startX, startY, orig:{left,top,width,height} }
+let fileViewMaxed = false;          // 最大化态：toggleFileViewMax 置位
+let fileViewPreMaxRect = null;      // 最大化前的窗口 rect（还原图标用）
+
+function fileViewModal() { return document.getElementById('fileViewModal'); }
+
+// 按扩展名映射 highlight.js 语言 id（不认识的扩展名返回 null，走 autoHighlight 按内容猜）
+const FILE_VIEW_LANG_MAP = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  json: 'json', jsonc: 'json',
+  html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml', vue: 'xml', xaml: 'xml',
+  css: 'css', scss: 'scss', less: 'less',
+  md: 'markdown', markdown: 'markdown',
+  py: 'python', rb: 'ruby', php: 'php', java: 'java', kt: 'kotlin', kts: 'kotlin',
+  go: 'go', rs: 'rust', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp',
+  cs: 'csharp', swift: 'swift', dart: 'dart', scala: 'scala',
+  sh: 'bash', bash: 'bash', zsh: 'bash', bat: 'dos', cmd: 'dos', ps1: 'powershell',
+  yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini', properties: 'ini',
+  sql: 'sql', lua: 'lua', pl: 'perl', r: 'r', groovy: 'groovy', gradle: 'groovy',
+  txt: 'plaintext', log: 'plaintext',
+};
+
+// ---------- 开关与内容渲染 ----------
+
+async function openFileViewer(sub) {
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  if (!proj) return;
+  const overlay = document.getElementById('fileViewOverlay');
+  const loading = document.getElementById('fileViewLoading');
+  const notice = document.getElementById('fileViewNotice');
+  const pre = document.getElementById('fileViewPre');
+  document.getElementById('fileViewTitle').textContent = sub;
+  loading.style.display = ''; loading.textContent = '加载中…';
+  notice.style.display = 'none'; pre.style.display = 'none';
+  overlay.classList.add('show');
+  // 每次打开都还原到默认位置尺寸：居中一次，之后拖动/缩放自由摆放
+  resetFileViewSize();
+  try {
+    const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(sub)}`);
+    const data = await resp.json();
+    // 可能等待期间用户已关闭，不再写 DOM
+    if (!overlay.classList.contains('show')) return;
+    if (!data.ok) { showFileViewNotice(data.msg || '读取文件失败'); return; }
+    if (data.tooLarge) { showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); return; }
+    if (data.isBinary) { showFileViewNotice('二进制文件，暂不支持查看'); return; }
+    renderFileViewContent(data.content || '', sub);
+  } catch (e) {
+    if (overlay.classList.contains('show')) showFileViewNotice('读取失败: ' + e.message);
+  }
+}
+
+function closeFileViewer() {
+  document.getElementById('fileViewOverlay').classList.remove('show');
+}
+
+// 大文件 / 二进制 / 错误的统一提示态
+function showFileViewNotice(msg) {
+  document.getElementById('fileViewLoading').style.display = 'none';
+  const notice = document.getElementById('fileViewNotice');
+  notice.textContent = msg;
+  notice.style.display = '';
+  document.getElementById('fileViewPre').style.display = 'none';
+}
+
+function fmtFileViewSize(n) {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+  return n + ' B';
+}
+
+// 高亮渲染：按 \n 切行，每行独立 hljs 高亮 + 行号列（.fv-ln sticky 左固定）。
+// 不整段 highlight 再切行的原因：hljs 输出的 span 会跨行，按行切开必然产生破碎标签；
+// 逐行调用的代价是块级结构（多行注释/模板字符串）后续行不着色——对查看场景可接受，
+// 换来正确的行号与滚动性能。
+function renderFileViewContent(code, sub) {
+  document.getElementById('fileViewLoading').style.display = 'none';
+  document.getElementById('fileViewNotice').style.display = 'none';
+  const pre = document.getElementById('fileViewPre');
+  const codeEl = document.getElementById('fileViewCode');
+  const ext = (sub.split('.').pop() || '').toLowerCase();
+  const lang = FILE_VIEW_LANG_MAP[ext];
+  const canHi = (l) => window.hljs && lang && lang !== 'plaintext' && hljs.getLanguage(lang);
+  const lines = code.split('\n');
+  const parts = [];
+  try {
+    for (let i = 0; i < lines.length; i++) {
+      const lineHtml = canHi(lines[i])
+        ? hljs.highlight(lines[i], { language: lang, ignoreIllegals: true }).value
+        : escapeHtml(lines[i]);
+      // 行是 display:block 的 span，行与行之间不能再拼 '\n'——code 是 white-space:pre，
+      // 拼进去的换行符会额外生成空行盒，视觉上就是行距翻倍
+      parts.push(`<span class="fv-line"><span class="fv-ln">${i + 1}</span>${lineHtml || '\n'}</span>`);
+    }
+    codeEl.innerHTML = parts.join('');
+  } catch (_) {
+    codeEl.innerHTML = escapeHtml(code);
+  }
+  pre.style.display = '';
+  pre.scrollTop = 0; pre.scrollLeft = 0;
+}
+
+// ---------- 拖动与缩放 ----------
+// 统一 pointer 会话模型：pointerdown 记录起点与窗口原 rect；pointermove 按 mode 计算新 rect；
+// 缩放按方向 dir 决定动哪条边（固定对边），clamp 到最小尺寸与视口范围。
+
+function beginFileViewDrag(e, mode, dir) {
+  if (e.button !== 0) return;
+  const m = fileViewModal();
+  const rect = m.getBoundingClientRect();
+  fileViewDrag = {
+    mode, dir: dir || '',
+    startX: e.clientX, startY: e.clientY,
+    orig: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+  };
+  m.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function moveFileViewDrag(e) {
+  if (!fileViewDrag) return;
+  const m = fileViewModal();
+  // 窗口被拖动/缩放过：亮出「还原默认大小」按钮（resetFileViewSize 里再隐藏）
+  const restore = document.getElementById('fileViewRestoreBtn');
+  if (restore) restore.style.display = '';
+  const dx = e.clientX - fileViewDrag.startX;
+  const dy = e.clientY - fileViewDrag.startY;
+  const o = fileViewDrag.orig;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  if (fileViewDrag.mode === 'move') {
+    // 拖动：clamp 留 40px 标题栏在视口内可抓回
+    let left = o.left + dx, top = o.top + dy;
+    left = Math.min(Math.max(left, 40 - o.width), vw - 40);
+    top = Math.min(Math.max(top, 0), vh - 40);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+    return;
+  }
+  // 缩放：按方向动边。n/s/w/e 及组合；固定对边再 clamp 宽高
+  let { left, top, width, height } = o;
+  const dir = fileViewDrag.dir;
+  if (dir.includes('e')) width = o.width + dx;
+  if (dir.includes('s')) height = o.height + dy;
+  if (dir.includes('w')) { width = o.width - dx; }
+  if (dir.includes('n')) { height = o.height - dy; }
+  width = Math.max(FILE_VIEW_MIN.width, Math.min(width, vw - 20));
+  height = Math.max(FILE_VIEW_MIN.height, Math.min(height, vh - 20));
+  // 动左/上边时，把 clamp 造成的尺寸回灌到位置（保持对边不动）
+  if (dir.includes('w')) left = o.left + (o.width - width);
+  if (dir.includes('n')) top = o.top + (o.height - height);
+  m.style.width = width + 'px';
+  m.style.height = height + 'px';
+  m.style.left = left + 'px';
+  m.style.top = top + 'px';
+}
+
+function endFileViewDrag() { fileViewDrag = null; }
+
+// 还原默认大小并居中（打开时与双击标题栏、还原按钮共用）。
+// 同时退出最大化态：直接清标记（不走 setFileViewMaxed(false) 的 rect 还原分支，
+// 否则会用最大化前的旧 rect 覆盖这里的默认尺寸）。
+function resetFileViewSize() {
+  const m = fileViewModal();
+  const w = Math.min(FILE_VIEW_DEFAULT.width, window.innerWidth - 40);
+  const h = Math.min(FILE_VIEW_DEFAULT.height, window.innerHeight - 40);
+  m.style.width = w + 'px';
+  m.style.height = h + 'px';
+  m.style.left = Math.max(0, (window.innerWidth - w) / 2) + 'px';
+  m.style.top = Math.max(0, (window.innerHeight - h) / 2) + 'px';
+  m.style.borderRadius = '';
+  fileViewMaxed = false;
+  fileViewPreMaxRect = null;
+  document.getElementById('fileViewRestoreBtn').style.display = 'none';
+  updateFileViewMaxBtn();
+}
+
+// 最大化 / 还原：最大化铺满视口（手柄热区贴边仍可拖），还原回最大化前的 rect。
+// 最大化前 rect 记在 fileViewPreMaxRect；连续两次 toggle 一来一回。
+function toggleFileViewMax() {
+  const m = fileViewModal();
+  if (!fileViewMaxed) {
+    const rect = m.getBoundingClientRect();
+    fileViewPreMaxRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    m.style.left = '0px';
+    m.style.top = '0px';
+    m.style.width = window.innerWidth + 'px';
+    m.style.height = window.innerHeight + 'px';
+    m.style.borderRadius = '0';
+    fileViewMaxed = true;
+  } else {
+    if (fileViewPreMaxRect) {
+      m.style.left = fileViewPreMaxRect.left + 'px';
+      m.style.top = fileViewPreMaxRect.top + 'px';
+      m.style.width = fileViewPreMaxRect.width + 'px';
+      m.style.height = fileViewPreMaxRect.height + 'px';
+      m.style.borderRadius = '';
+    } else {
+      // 异常路径（有标记无 rect）：退回默认居中
+      fileViewMaxed = false;
+      resetFileViewSize();
+      return;
+    }
+    fileViewMaxed = false;
+    fileViewPreMaxRect = null;
+  }
+  updateFileViewMaxBtn();
+}
+
+// 最大化按钮图标/tooltip 随状态切换（□ 最大化 ⇄ 双层框 还原）
+function updateFileViewMaxBtn() {
+  const maxBtn = document.getElementById('fileViewMaxBtn');
+  if (!maxBtn) return;
+  maxBtn.title = fileViewMaxed ? '还原' : '最大化';
+  maxBtn.innerHTML = fileViewMaxed
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
+}
+
+// 双击标题栏：还原默认大小居中。还原按钮平时隐藏，窗口被改动后显示
+function fileViewTitlebarDblClick(e) {
+  if (e.target.closest('.file-view-tb-btn')) return;
+  resetFileViewSize();
+}
+
+// 拖动/缩放会话绑在 modal 元素上（手柄是 modal 子元素，capture 后 move/up 都会回到 modal）
+(function initFileViewWindowing() {
+  const m = fileViewModal();
+  const titlebar = document.getElementById('fileViewTitlebar');
+  titlebar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.file-view-tb-btn')) return;
+    // 最大化态拖标题栏：先还原回最大化前的 rect，再从还原后的位置继续拖（标准窗口行为）
+    if (fileViewMaxed) toggleFileViewMax();
+    beginFileViewDrag(e, 'move');
+  });
+  titlebar.addEventListener('dblclick', fileViewTitlebarDblClick);
+  for (const h of m.querySelectorAll('.fv-rz')) {
+    h.addEventListener('pointerdown', (e) => beginFileViewDrag(e, 'rz', h.dataset.rz));
+  }
+  m.addEventListener('pointermove', moveFileViewDrag);
+  m.addEventListener('pointerup', endFileViewDrag);
+  m.addEventListener('pointercancel', endFileViewDrag);
+  // Esc 关闭（窗口打开时优先于其它 Esc 处理）
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('fileViewOverlay').classList.contains('show')) {
+      e.stopPropagation();
+      closeFileViewer();
+    }
+  });
+})();
 
 // 启动即应用已保存的字体设置（localStorage，默认 Cascadia Code 13px）
 applyTermSettings();

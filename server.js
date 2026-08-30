@@ -694,6 +694,11 @@ app.use('/vendor/xterm', express.static(
 app.use('/vendor/xterm-addon-fit', express.static(
   path.join(ROOT_DIR, 'node_modules', '@xterm', 'addon-fit'), staticOpts
 ));
+// highlight.js：文件查看模态框的语法高亮。用法同 xterm——前端从 /vendor/hljs/
+// 加载 highlight.min.js 与深色主题 css，直接映射 node_modules 下的包目录。
+app.use('/vendor/hljs', express.static(
+  path.join(ROOT_DIR, 'node_modules', '@highlightjs', 'cdn-assets'), staticOpts
+));
 
 // 关于页内容源：根目录 ABOUT.md（前端 fetch 后本地渲染 markdown）。
 // 版本号自动同步：以 package.json 的 version 为准，替换 ABOUT.md 中的
@@ -969,6 +974,48 @@ app.get('/api/projects/:id/files', (req, res) => {
     // 目录优先、再按名称排序（Windows 资源管理器习惯）
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
   res.json({ ok: true, path: sub || '', items });
+});
+
+// 文件内容只读查看：返回文本内容供前端文件查看模态框渲染（本期只做查看，不做编辑）。
+// 参数 sub：相对 projectPath 的文件路径。与 /files 相同的沙箱化：resolve 后必须仍在 base 之下。
+// 防护：
+//   1. 大小限制 MAX_VIEW_FILE_SIZE（2MB）——超限返回 tooLarge 标记，前端展示友好提示，
+//      避免把几 MB 的日志/构建产物整个塞进 WebView。
+//   2. 二进制检测——读取后扫描 NUL 字节（\0），文本文件几乎不会含 NUL；
+//      是二进制则返回 isBinary 标记，前端不渲染乱码。
+app.get('/api/projects/:id/file-content', (req, res) => {
+  const MAX_VIEW_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const sub = req.query.sub ? String(req.query.sub) : '';
+  if (!sub) return res.status(400).json({ ok: false, msg: '未指定文件路径' });
+  const target = path.resolve(path.join(base, sub));
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    return res.status(404).json({ ok: false, msg: '文件不存在: ' + sub });
+  }
+  const stat = fs.statSync(target);
+  if (stat.size > MAX_VIEW_FILE_SIZE) {
+    return res.json({ ok: true, tooLarge: true, size: stat.size });
+  }
+  let buf;
+  try {
+    buf = fs.readFileSync(target);
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '读取文件失败: ' + (err.message || '') });
+  }
+  // 二进制检测：前 8KB 内出现 NUL 字节即判定为二进制
+  const probe = buf.subarray(0, 8192);
+  if (probe.includes(0)) {
+    return res.json({ ok: true, isBinary: true, size: stat.size });
+  }
+  // UTF-8 解码；非法字节序列会被替换为 U+FFFD（与编辑器打开乱码的行为一致）
+  res.json({ ok: true, content: buf.toString('utf8'), size: stat.size });
 });
 
 // 日志历史：start.log 是全量历史（appendLog 同时写文件和内存缓冲），
