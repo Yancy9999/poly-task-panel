@@ -1134,7 +1134,9 @@ function registerGitNetworkRoute(routePath, gitArgs, label) {
     res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
   });
 }
-registerGitNetworkRoute('push', ['push'], 'push');
+// push 用 -u origin HEAD：不依赖 upstream 已设置，本地新建分支第一次推送即可成功，
+// -u 顺带建立跟踪关系（已有 upstream 的分支行为等价，HEAD detached 时报错同裸 push）
+registerGitNetworkRoute('push', ['push', '-u', 'origin', 'HEAD'], 'push');
 registerGitNetworkRoute('pull', ['pull'], 'pull');
 // fetch：只更新远端跟踪指针（origin/main 等），不动工作区——
 // 供前端打开抽屉/点刷新时刷新 ahead/behind 徽标，安全无副作用
@@ -1164,7 +1166,9 @@ app.post('/api/projects/:id/git/undo-commit', async (req, res) => {
   res.json({ ok: true, msg: '已撤回最新提交，改动回到已暂存区' });
 });
 
-// 分支列表：--format 直接给 JSON 友好的字段（%(refname:short)\t%(HEAD)），避免解析 * 前缀的本地化歧义
+// 分支列表：--format 直接给 JSON 友好的字段（%(refname:short)\t%(HEAD)），避免解析 * 前缀的本地化歧义。
+// 同时附带远程分支列表（git branch -r，origin/xxx 原样），前端"新建分支"的起点下拉用；
+// 无远端时 remote 为空数组。
 app.get('/api/projects/:id/git/branches', async (req, res) => {
   const p = getGitProject(req, res);
   if (!p) return;
@@ -1182,7 +1186,29 @@ app.get('/api/projects/:id/git/branches', async (req, res) => {
     branches.push(name);
     if (isHead) current = name;
   }
-  res.json({ ok: true, branches, current });
+  const rr = await runGit(p, ['branch', '-r', '--format=%(refname:short)']);
+  const remote = rr.ok
+    ? rr.stdout.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.endsWith('/HEAD'))
+    : [];
+  res.json({ ok: true, branches, current, remote });
+});
+
+// 新建分支：body { name, from? }。from 为空从当前 HEAD 建；为远程分支名（origin/xxx）
+// 时以其为起点，git checkout -b 自动建立 tracking。失败返回 git 原始报错（分支已存在等）。
+app.post('/api/projects/:id/git/branch-create', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const name = String((req.body && req.body.name) || '').trim();
+  const from = String((req.body && req.body.from) || '').trim();
+  if (!name) return res.status(400).json({ ok: false, msg: '未指定分支名' });
+  if (/\s/.test(name)) return res.status(400).json({ ok: false, msg: '分支名不能包含空格' });
+  const args = ['checkout', '-b', name];
+  if (from) args.push(from);
+  const r = await runGit(p, args);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '新建分支失败' });
+  }
+  res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
 });
 
 // 切换分支：body { branch }
