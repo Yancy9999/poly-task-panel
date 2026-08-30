@@ -39,6 +39,10 @@
   .sidebar-header button { background: #165dff; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .sidebar-header button:hover { background: #0e42d2; }
   .sidebar-list { flex: 1; overflow-y: auto; min-height: 0; }
+  .sidebar-list::-webkit-scrollbar { width: 5px; }
+  .sidebar-list::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
+  .sidebar-list::-webkit-scrollbar-thumb:hover { background: #4a4c4f; }
+  .sidebar-list::-webkit-scrollbar-track { background: transparent; }
   .panel-project .empty { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; }
   /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片（深色系，紧凑间距：
      左右 margin 与卡片纵向间距一致） */
@@ -175,6 +179,10 @@
   .settings-nav-item.active { background: #e8f3ff; color: #165dff; font-weight: 600; }
   /* 右侧内容区：超高时内部滚动，避免撑高面板 */
   .settings-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding-right: 4px; }
+  .settings-content::-webkit-scrollbar { width: 5px; }
+  .settings-content::-webkit-scrollbar-thumb { background: #e5e6eb; border-radius: 4px; }
+  .settings-content::-webkit-scrollbar-thumb:hover { background: #c9cdd4; }
+  .settings-content::-webkit-scrollbar-track { background: transparent; }
   .settings-tab h2 { font-size: 15px; margin-bottom: 14px; }
   .settings-modal .modal-actions { border-top: 1px solid #f2f3f5; padding-top: 16px; margin-top: 18px; }
   /* 关闭叉叉：设置面板右上角，全局替代「取消」。SVG 图标保证 flex 居中，不随字体基线偏移 */

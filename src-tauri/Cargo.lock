@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "poly-task-panel"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "tauri",
  "tauri-build",
