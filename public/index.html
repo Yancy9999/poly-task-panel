@@ -481,12 +481,12 @@
   /* 「提交历史」与上方变更文件列表之间的分割线：#3a3c3f 比 #2a2e33 高两档，深底上肉眼可辨 */
   .git-section-title.history { border-top: 1px solid #3a3c3f; padding-top: 10px; margin-top: 14px; }
   .git-section-title .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 500; }
-  /* 分组标题全选勾选框：与文件行勾选框同宽纵向对齐 */
-  .git-section-title input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; }
+  /* 分组标题全选勾选框：与文件行勾选框同宽纵向对齐；选中态绿色（accent-color 着色原生勾选框） */
+  .git-section-title input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: #4cd964; }
   /* 变更文件行：勾选框 + 状态标 + 文件名；点文件名看 diff */
   .git-file-row { display: flex; align-items: center; gap: 6px; height: 26px; margin-left: 16px; padding: 0 6px; border-radius: 5px; cursor: default; user-select: none; }
   .git-file-row:hover { background: #2a2e33; }
-  .git-file-row input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; }
+  .git-file-row input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: #4cd964; }
   .git-file-row .st { flex-shrink: 0; width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 3px; font-size: 10px; font-weight: 700; font-family: Consolas, monospace; }
   .git-file-row .st.M { background: #4a3315; color: #ff8f1f; }
   .git-file-row .st.A { background: #173b1f; color: #4cd964; }
@@ -496,6 +496,22 @@
   .git-file-row .st.Q { background: #33363a; color: #a9aeb8; }  /* ? 未跟踪（class 不支持 ? 字符，映射为 Q） */
   .git-file-row .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .git-file-row .fname:hover { text-decoration: underline; color: #79a8ff; }
+  /* 文件行的「- 相对路径」淡色后缀（Git/SVN 文件行共用） */
+  .git-file-row .fname .dir { color: #86909c; }
+  /* SVN 已暂存区的移出按钮（−）：点击把文件移出提交清单，hover 红 */
+  .svn-unstage-btn { flex-shrink: 0; width: 16px; height: 16px; line-height: 14px; padding: 0; text-align: center; border: none; background: transparent; color: #86909c; font-size: 14px; cursor: pointer; border-radius: 3px; }
+  .svn-unstage-btn:hover { background: #4a1a1a; color: #f56a6a; }
+  /* SVN A 状态条目的「撤销版本控制」按钮（↩）：撤销 svn add，文件回无版本管理区 */
+  .svn-unadd-btn { flex-shrink: 0; width: 16px; height: 16px; line-height: 14px; padding: 0; text-align: center; border: none; background: transparent; color: #86909c; font-size: 13px; cursor: pointer; border-radius: 3px; }
+  .svn-unadd-btn:hover { background: #1c2f4a; color: #79a8ff; }
+  /* 撤销修改按钮的文件+回转箭头 SVG：占满按钮（16px），笔画继承按钮色 */
+  .svn-unadd-btn svg { width: 13px; height: 13px; display: block; margin: 0 auto; }
+  /* SVN 可折叠分区标题（更改/无版本管理）：点标题整组折叠展开；全选框 stopPropagation 不触发折叠 */
+  .git-section-title.foldable { cursor: pointer; user-select: none; border-radius: 5px; }
+  .git-section-title.foldable:hover { color: #c9cdd4; }
+  .git-section-title .caret { color: #86909c; font-size: 10px; width: 10px; flex-shrink: 0; }
+  /* SVN 分区条目相对分区标题缩进一级（待提交/更改/无版本管理共用） */
+  .git-file-row.svn-child { margin-left: 30px; }
   /* 提交区：textarea + 提交按钮 */
   .git-commit-area { margin-top: 10px; border-top: 1px solid #2a2e33; padding-top: 8px; }
   .git-commit-area textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #3a3c3f; border-radius: 5px; background: #2a2e33; color: #e3e3e3; font-size: 12px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; resize: vertical; min-height: 48px; }
@@ -504,6 +520,20 @@
   .git-commit-btn { flex: 1; padding: 6px 0; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 12px; cursor: pointer; transition: background .12s; }
   .git-commit-btn:hover { background: #0e42d2; }
   .git-commit-btn:disabled { opacity: .4; cursor: not-allowed; }
+  /* 提交/提交并推送在途：被点的按钮文字前转圈圈 */
+  .git-commit-btn.busy { opacity: .75; }
+  .git-commit-btn.busy::before {
+    content: '';
+    display: inline-block;
+    width: 10px; height: 10px;
+    margin-right: 5px;
+    vertical-align: -1px;
+    border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: git-btn-spin .7s linear infinite;
+  }
+  @keyframes git-btn-spin { to { transform: rotate(360deg); } }
   /* 提交并推送：次级按钮，深色底不抢主按钮视觉 */
   .git-commit-btn.secondary { background: #2a2e33; color: #a9aeb8; border: 1px solid #3a3c3f; }
   .git-commit-btn.secondary:hover { background: #2a3a4f; color: #e3e3e3; border-color: #165dff; }
@@ -515,6 +545,8 @@
   .git-log-row .meta .hash { font-family: Consolas, monospace; color: #79a8ff; }
   /* 历史行「未推送」徽标：橙色小标签（与推送按钮 ahead 徽标同色系），已推送不渲染 */
   .git-log-row .git-push-badge { flex-shrink: 0; background: #4a3315; color: #ff8f1f; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 600; line-height: 14px; }
+  /* SVN 历史行「未更新」徽标：蓝色小标签（与更新按钮 behind 徽标同色系），rev > 本地基准版本才渲染 */
+  .git-log-row .svn-outdated-badge { flex-shrink: 0; background: #1c2f4a; color: #79a8ff; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 600; line-height: 14px; }
   /* 历史条目展开：提交行下方的变更文件列表（缩进对齐提交行） */
   .git-log-item { border-radius: 5px; }
   .git-log-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 5px; font-size: 9px; font-weight: 500; }
@@ -614,7 +646,7 @@
   <div class="activity-bar">
     <button id="activityProjectBtn" title="项目列表" onclick="toggleSidePanel('project')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></button>
     <button id="activityFileBtn" title="文件目录浏览" onclick="toggleSidePanel('file')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></button>
-    <button id="activityGitBtn" title="Git 管理" onclick="toggleSidePanel('git')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+    <button id="activityGitBtn" title="版本管理（Git / SVN）" onclick="toggleSidePanel('git')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
     <button id="activityEditorBtn" title="文件编辑器" onclick="toggleFileViewWindow()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     <button class="gear-btn" title="设置（终端/日志字体）" onclick="openSettingsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </div>
@@ -2055,7 +2087,7 @@ function renderList() {
     const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
         <div class="term-new-row">
           <button title="文件目录浏览（切换到该项目目录）" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
-          <button title="Git 管理（状态/提交/推送/历史）" onclick="event.stopPropagation(); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+          <button title="版本管理（Git / SVN：状态/提交/更新/历史）" onclick="event.stopPropagation(); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
           <button title="打开 cmd 命令行" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')">${CMD_LOGO}</button>
           <button title="新建 claude 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')">${CLAUDE_LOGO}</button>
           <button title="新建 codex 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')">${CODEX_LOGO}</button>
@@ -3663,6 +3695,10 @@ let gitBranchPop = null;
 const ICON_GIT_BRANCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>';
 const ICON_GIT_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
 const ICON_GIT_CHECK = '<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+// 撤销修改：文件轮廓 + 内容区中间偏左的 ↩ 回转箭头（corner-up-left 造型，箭头超出文件左边界，
+// 视觉上"从文件里撤出来"，区别于 SVN 撤销版本控制的纯 ↩）
+const ICON_FILE_REVERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10.5a2 2 0 0 0 2-2V9z"/><polyline points="15.5 3 15.5 9 20.5 9"/><polyline points="8 20 2 14.5 8 9"/><path d="M2 14.5H13.5a3.25 3.25 0 0 1 0 6.5h-3.5"/></svg>';
 
 function applyGitDrawerState() {
   // 开关/宽度/高亮统一由 applySideDrawerState 承担；此处仅同步派生态
@@ -3676,10 +3712,12 @@ function openGitDrawer(projectId) {
     if (act && act.projectId) projectId = act.projectId;
   }
   if (projectId) {
+    if (gitDrawerProjectId !== projectId) svnStagedReset(); // 切项目：换载该项目的暂存集合
     gitDrawerProjectId = projectId;
     localStorage.setItem(GIT_DRAWER_PROJECT_KEY, projectId);
   } else if (!gitDrawerProjectId) {
     gitDrawerProjectId = localStorage.getItem(GIT_DRAWER_PROJECT_KEY) || null;
+    svnStaged = svnStagedLoad(); // 首次恢复持久化项目时同步载入其暂存集合
   }
   // 绑定项目已删：回退空白。仅项目列表非空时判定——列表未加载（projects=[]）时
   // 找不到 ≠ 已删除，避免时序问题误清持久化绑定（如刷新早期被调用）
@@ -3715,9 +3753,17 @@ function renderGitDrawerTitle() {
   const el = document.getElementById('gitDrawerTitle');
   if (!el) return;
   const proj = projects.find(x => x.id === gitDrawerProjectId);
-  el.textContent = proj ? `Git · ${proj.name}` : 'Git';
+  const kindLabel = gitRepoKind === 'svn' ? 'SVN' : 'Git';
+  el.textContent = proj ? `${kindLabel} · ${proj.name}` : kindLabel;
 }
 function refreshGitDrawer() {
+  if (gitRepoKind === 'svn' && svnStatus) {
+    // SVN 工作副本：刷新走 SVN 路径（重新探测类型，防止目录被改成 git 仓库后卡死在 SVN 视图）
+    loadGitStatus();
+    // 手动刷新时顺带强制检测远端待更新条目（更新 behind 徽标），不受 1 分钟节流约束
+    svnRemoteCheckThrottled(true);
+    return;
+  }
   loadGitStatus();
   gitLogCache = [];
   renderGitLog();
@@ -3772,6 +3818,11 @@ async function gitFetch(route, opts) {
   return data;
 }
 // 拉取 status 并整段重渲染抽屉 body
+// 仓库类型：项目目录可能是 git 仓库、SVN 工作副本或两者都不是。
+// loadGitStatus 先探测 git，notRepo 时再探测 svn，结果记入 gitRepoKind
+//（'git' | 'svn'），后续刷新/标题渲染按类型分发。
+let gitRepoKind = 'git';
+
 async function loadGitStatus() {
   const body = document.getElementById('gitDrawerBody');
   if (!body) return;
@@ -3784,10 +3835,39 @@ async function loadGitStatus() {
     return;
   }
   if (data.notRepo) {
-    body.innerHTML = `<div class="git-not-repo">该目录不是 git 仓库<br/><button class="git-init-btn" onclick="gitInitRepo()">初始化仓库</button></div>`;
+    // git 仓库判定失败 → 探测 SVN 工作副本（注意走 svnFetch，gitFetch 会拼 /git/ 前缀）
+    try {
+      const sdata = await svnFetch('status');
+      if (sdata.ok || sdata.noSvn) {
+        gitRepoKind = 'svn';
+        renderGitDrawerTitle();
+        if (sdata.noSvn) {
+          body.innerHTML = `<div class="git-not-repo">该目录是 SVN 工作副本，但本机没有可用的 svn 命令行。<br/><span style="font-size:11px">请安装 TortoiseSVN（勾选 command line client tools）或 Apache Subversion 命令行工具后重启本应用。</span></div>`;
+          return;
+        }
+        // 保留旧 behind 值：刷新时 remote-status 与 status 并发，status 不带 behind，
+        // 直接覆盖会把 remote-status 先算出的徽标数字抹掉（渲染时闪一下就没）。
+        // 立即检测完成后会用新值覆盖，这里只做竞态兜底。
+        sdata.behind = svnStatus ? svnStatus.behind : null;
+        svnStatus = sdata;
+        // 切项目：换载该项目的本面板提交版本号集合；同项目：剪掉 ≤ 新 BASE 的失效条目
+        svnOwnRevs = svnOwnRevsLoad();
+        svnOwnRevsPrune(parseInt(sdata.rev, 10));
+        svnStagedPrune(sdata.files); // 剔除暂存集合里已不存在的文件（外部 revert/删除）
+        renderSvnBody();
+        svnLogCache = [];
+        renderSvnLog();
+        loadSvnLog();
+        svnRemoteCheckThrottled(); // 打开抽屉自动检测远端待更新条目（1 分钟节流）
+        return;
+      }
+    } catch (e) { /* 探测失败按原 notRepo 占位处理 */ }
+    gitRepoKind = 'git';
+    body.innerHTML = `<div class="git-not-repo">该目录不是 git 仓库或 SVN 工作副本<br/><button class="git-init-btn" onclick="gitInitRepo()">初始化 git 仓库</button></div>`;
     renderGitDrawerTitle();
     return;
   }
+  gitRepoKind = 'git';
   if (!data.ok) {
     body.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'git status 失败')}</div>`;
     return;
@@ -3915,7 +3995,7 @@ document.addEventListener('click', () => {
   if (gitBranchPop && gitDrawerOpen) { gitBranchPop = null; renderGitBody(); }
 });
 // status.files 按 porcelain XY 展开：每个文件最多出现两条（staged X / unstaged Y）。
-// x='?'（未跟踪）单独归入 untracked 组（"未加入版本控制"），与普通修改区分展示。
+// x='?'（未跟踪）单独归入 untracked 组（组标题「无版本管理」），与普通修改区分展示。
 function splitGitFiles(files) {
   const staged = [];
   const unstaged = [];
@@ -3947,6 +4027,24 @@ function gitSectionTitleWithAll(label, count, group) {
     ${label} <span class="cnt">${count}</span>
   </div>`;
 }
+// ---------- Git 分区折叠（更改 / 无版本管理） ----------
+// 与 SVN 侧同思路：点分区标题整组折叠/展开，状态持久化 localStorage。
+// 无版本管理（untracked）在用户未操作过时默认折叠；操作过一次后完全按记录来。
+const GIT_SECTION_FOLD_KEY = 'gitSectionFold';
+function gitSectionFoldLoad() {
+  try { return JSON.parse(localStorage.getItem(GIT_SECTION_FOLD_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+function isGitSectionFolded(group) {
+  const st = gitSectionFoldLoad();
+  return group in st ? !!st[group] : group === 'untracked'; // 未操作过：无版本管理默认折叠
+}
+function toggleGitSection(group) {
+  const st = gitSectionFoldLoad();
+  st[group] = !isGitSectionFolded(group);
+  try { localStorage.setItem(GIT_SECTION_FOLD_KEY, JSON.stringify(st)); } catch (e) { /* 仅本次不持久化 */ }
+  renderGitFilesArea();
+}
 // 整组勾选/取消：staged 组默认全勾上（取消勾=整组撤销暂存）；
 // unstaged/untracked 组默认不勾（勾上=整组一次 git add）
 async function gitStageAll(group, checked) {
@@ -3957,27 +4055,142 @@ async function gitStageAll(group, checked) {
   if (!targets.length) return;
   await gitStageFiles(targets, group === 'staged' ? true : !checked, true);
 }
+
+// 批量暂存（整组勾选）：? 文件先 svn add（一次请求批量），全部入清单；
+// 就地更新 svnStatus 状态后只重绘变更区（历史区不闪）
+async function svnStageFiles(files) {
+  const unversioned = files.filter(f => {
+    const entry = svnStatus && svnStatus.files.find(x => x.file === f);
+    return entry && entry.st === '?';
+  });
+  if (unversioned.length) {
+    try {
+      const data = await svnFetch('add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: unversioned }),
+      });
+      if (!data.ok) { showToast('加入版本控制失败', 'error'); }
+      else {
+        // 就地更新状态 ? → A（add 是纯元数据操作，无其他副作用）
+        for (const f of unversioned) {
+          const entry = svnStatus && svnStatus.files.find(x => x.file === f);
+          if (entry) entry.st = 'A';
+        }
+      }
+    } catch (e) {
+      showToast('加入版本控制失败: ' + e.message, 'error');
+    }
+  }
+  files.forEach(f => svnStagedToggle(f, true));
+  renderSvnFilesArea();
+}
+// SVN 整组暂存/取消：modified（更改，含未暂存 A）组勾选 = 全组移入暂存；newly
+// （无版本管理，? 文件先 svn add）组勾选 = 全组移入暂存。取消勾选 = 整组移出待提交。
+async function svnStageAllGroup(group, checked) {
+  if (!svnStatus) return;
+  const { changed, added, unversioned } = svnSplitFiles(svnStatus.files);
+  const addedFiles = visibleAddedEntries(added, unversioned);
+  const map = { modified: [...changed, ...addedFiles], newly: unversioned };
+  const targets = (map[group] || []).map(f => f.file);
+  if (!targets.length) return;
+  if (checked) {
+    await svnStageFiles(targets);
+  } else {
+    targets.forEach(f => svnStagedToggle(f, false));
+    renderSvnFilesArea();
+  }
+}
+// 勾选「更改」区文件 = 暂存（移入待提交清单）；取消勾选 = 移出（回更改区）。
+// 更改区含 M/D/R/C/! 与未暂存的 A——都是纯前端记录，svn 状态不变，无需服务端调用。
+async function onSvnStage(file, checked) {
+  svnStagedToggle(file, checked);
+  renderSvnFilesArea();
+}
+// 勾选「无版本管理」区文件 = 加入提交清单。? 文件先真实 svn add（成功后状态变 A，
+// 就地更新 svnStatus 后只重绘变更区——不整段 loadGitStatus，历史列表不闪）。
+async function onSvnStageNew(file, checked) {
+  if (!checked) {
+    svnStagedToggle(file, false);
+    renderSvnFilesArea();
+    return;
+  }
+  try {
+    const data = await svnFetch('add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [file] }),
+    });
+    if (!data.ok) { showToast('加入版本控制失败', 'error'); renderSvnFilesArea(); return; }
+  } catch (e) {
+    showToast('加入版本控制失败: ' + e.message, 'error');
+    renderSvnFilesArea();
+    return;
+  }
+  svnStagedToggle(file, true);
+  // add 后状态 ? → A：就地更新 svnStatus 该条目（add 是纯元数据操作，无其他副作用），
+  // 重绘变更区即完成分区流转；历史区 DOM 不动
+  const entry = svnStatus && svnStatus.files.find(f => f.file === file);
+  if (entry) entry.st = 'A';
+  renderSvnFilesArea();
+}
+// 待提交区点 ×：移出提交清单。取消勾选必须移出待提交——
+// A 文件回「更改」区（仍是 A）、M 等回「更改」区（svn 状态不变，纯前端操作）。
+function onSvnUnstage(file) {
+  svnStagedToggle(file, false);
+  renderSvnFilesArea();
+}
+// 待提交区「全部移出」：清空提交清单，全部条目按原状态回落（A/M 回更改区，纯前端操作）
+function svnUnstageAll() {
+  for (const f of [...svnStaged]) svnStagedToggle(f, false);
+  renderSvnFilesArea();
+}
+// ---------- SVN 分区折叠（更改 / 无版本管理） ----------
+// 点分区标题整组折叠/展开，状态持久化 localStorage。无版本管理（newly）在用户
+// 未操作过时默认折叠；操作过一次后完全按记录来。
+const SVN_SECTION_FOLD_KEY = 'svnSectionFold';
+function svnSectionFoldLoad() {
+  try { return JSON.parse(localStorage.getItem(SVN_SECTION_FOLD_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+function isSvnSectionFolded(group) {
+  const st = svnSectionFoldLoad();
+  return group in st ? !!st[group] : group === 'newly'; // 未操作过：无版本管理默认折叠
+}
+function toggleSvnSection(group) {
+  const st = svnSectionFoldLoad();
+  st[group] = !isSvnSectionFolded(group);
+  try { localStorage.setItem(SVN_SECTION_FOLD_KEY, JSON.stringify(st)); } catch (e) { /* 仅本次不持久化 */ }
+  renderSvnFilesArea();
+}
+// 「删除版本控制」：对更改区中的 A 状态文件执行 svn revert——add 是纯元数据操作，
+// revert 撤销 add 后文件回 ? 状态（出现在无版本管理区），文件内容不受影响。
+// 无确认弹窗：操作不丢内容（只撤销 add 元数据），右键菜单点选即执行，失败才提示。
+async function svnUnversionFile(file) {
+  try {
+    const data = await svnFetch('revert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [file] }),
+    });
+    if (!data.ok) { showToast(data.msg || '删除版本控制失败', 'error'); return; }
+    svnStagedToggle(file, false); // 已不在变更内，暂存集合同步剔除
+    // revert 撤销 add 是纯元数据操作（A → ?），结果前端可预知：就地更新条目状态，
+    // 只重绘变更区，历史区 DOM 不动
+    const entry = svnStatus && svnStatus.files.find(f => f.file === file);
+    if (entry) entry.st = '?';
+    renderSvnFilesArea();
+  } catch (e) {
+    showToast('删除版本控制失败: ' + e.message, 'error');
+  }
+}
 function renderGitBody() {
   const body = document.getElementById('gitDrawerBody');
   if (!body || !gitStatus) return;
   const { branch, files, ahead, behind } = gitStatus;
-  const { staged, unstaged, untracked } = splitGitFiles(files);
-  const proj = projects.find(x => x.id === gitDrawerProjectId);
   // ahead/behind 徽标：有 upstream 差异时显示数字（无差异/无 upstream 不显示）
   const abBadge = (n, cls, label) => n == null ? '' :
     `<span class="git-ab ${cls}" title="${label}">${n}</span>`;
-  // 文件行：文件名 - 相对路径（淡色）。根目录文件没有相对路径部分，只显示文件名。
-  // 目录型未跟踪条目（git 对整个未跟踪目录只报 "dir/" 一条）整体作为名字显示，
-  // 不拆分——否则 lastIndexOf('/') 会切出空文件名 + 悬空路径。
-  const fileCell = (file) => {
-    if (file.endsWith('/')) {
-      return `<span class="fname" title="${escapeHtml(file)}（目录，勾选将整个暂存）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(file)}</span>`;
-    }
-    const slash = file.lastIndexOf('/');
-    const name = slash >= 0 ? file.slice(slash + 1) : file;
-    const dir = slash >= 0 ? file.slice(0, slash) : '';
-    return `<span class="fname" title="${escapeHtml(file)}（点击查看 diff）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(name)}${dir ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(dir)}</span>` : ''}</span>`;
-  };
   const parts = [];
   // 分支区：分支名（按钮，点击弹分支面板）+ 刷新（刷新含 fetch，手动触发绕过节流）
   parts.push(`<div class="git-branch-row">
@@ -4001,44 +4214,17 @@ function renderGitBody() {
     parts.push('<div class="git-empty">工作区干净，没有变更</div>');
   } else {
     // 提交区：紧跟拉取/推送按钮下方（提交说明 + 提交 / 提交并推送 两个按钮）；
-    // 未配置远端时只显示「提交」——「提交并推送」点了必然推送失败
+    // 未配置远端时只显示「提交」——「提交并推送」点了必然推送失败。
+    // 与 SVN 同规则：暂存区为空时两个提交按钮禁用（只提交已暂存内容）
+    const stageEmpty = splitGitFiles(files).staged.length === 0;
     parts.push(`<div class="git-commit-area">
-      <textarea id="gitCommitMsg" placeholder="提交说明（必填）" rows="2"></textarea>
+      <textarea id="gitCommitMsg" placeholder="提交说明（必填）" rows="2" ${gitCommitInFlight ? 'disabled' : ''}></textarea>
       <div class="git-commit-btns">
-        <button class="git-commit-btn" onclick="gitCommit(false)">提交</button>
-        ${noRemote ? '' : '<button class="git-commit-btn secondary" onclick="gitCommit(true)">提交并推送</button>'}
+        <button class="git-commit-btn${gitCommitInFlight === 'gitCommitBtn' ? ' busy' : ''}" id="gitCommitBtn" onclick="gitCommit(false)" ${gitCommitInFlight || stageEmpty ? 'disabled' : ''}>提交</button>
+        ${noRemote ? '' : `<button class="git-commit-btn secondary${gitCommitInFlight === 'gitCommitPushBtn' ? ' busy' : ''}" id="gitCommitPushBtn" onclick="gitCommit(true)" ${gitCommitInFlight || stageEmpty ? 'disabled' : ''}>提交并推送</button>`}
       </div>
     </div>`);
-    // staged 区：勾选框状态 = git 真实暂存状态（已暂存默认勾上，取消勾选即 unstage）；组标题带「全选」
-    if (staged.length) {
-      parts.push(gitSectionTitleWithAll('已暂存', staged.length, 'staged'));
-      parts.push(staged.map(f => `
-        <div class="git-file-row">
-          <input type="checkbox" checked onchange="onGitStagedCheck('${escapeJs(f.file)}', this.checked)" title="已暂存；取消勾选则撤销暂存">
-          ${gitStBadge(f.st)}
-          ${fileCell(f.file)}
-        </div>`).join(''));
-    }
-    // unstaged 区：未暂存默认不勾，勾选即 git add；组标题带「全选」
-    if (unstaged.length) {
-      parts.push(gitSectionTitleWithAll('未暂存的修改', unstaged.length, 'unstaged'));
-      parts.push(unstaged.map(f => `
-        <div class="git-file-row">
-          <input type="checkbox" onchange="onGitUnstagedCheck('${escapeJs(f.file)}', this.checked)" title="勾选暂存此文件">
-          ${gitStBadge(f.st)}
-          ${fileCell(f.file)}
-        </div>`).join(''));
-    }
-    // untracked 区：未加入版本控制的文件（勾选即 git add）；组标题带「全选」
-    if (untracked.length) {
-      parts.push(gitSectionTitleWithAll('未加入版本控制', untracked.length, 'untracked'));
-      parts.push(untracked.map(f => `
-        <div class="git-file-row">
-          <input type="checkbox" onchange="onGitUntrackedCheck('${escapeJs(f.file)}', this.checked)" title="勾选加入版本控制（暂存）">
-          ${gitStBadge(f.st)}
-          ${fileCell(f.file)}
-        </div>`).join(''));
-    }
+    parts.push(`<div id="gitFilesArea">${gitFilesAreaHtml()}</div>`);
   }
   parts.push('<div class="git-section-title history">提交历史</div>');
   // 无远端引导：gitStatus.remoteAbsent 由 loadGitStatus 补拉 remote-url 后置位，
@@ -4049,25 +4235,121 @@ function renderGitBody() {
   parts.push('<div id="gitLogList"><div class="git-loading">加载中…</div></div>');
   body.innerHTML = parts.join('');
 }
+// 变更列表区 HTML（三分区：待提交(已暂存) / 更改 / 无版本管理），
+// renderGitBody 与 renderGitFilesArea 共用
+function gitFilesAreaHtml() {
+  const files = gitStatus ? gitStatus.files : [];
+  const { staged, unstaged, untracked } = splitGitFiles(files);
+  // 文件行：文件名 - 相对路径（淡色）。根目录文件没有相对路径部分，只显示文件名。
+  // 目录型未跟踪条目（git 对整个未跟踪目录只报 "dir/" 一条）整体作为名字显示，
+  // 不拆分——否则 lastIndexOf('/') 会切出空文件名 + 悬空路径。
+  const fileCell = (file) => {
+    if (file.endsWith('/')) {
+      return `<span class="fname" title="${escapeHtml(file)}（目录，勾选将整个暂存）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(file)}</span>`;
+    }
+    const slash = file.lastIndexOf('/');
+    const name = slash >= 0 ? file.slice(slash + 1) : file;
+    const dir = slash >= 0 ? file.slice(0, slash) : '';
+    return `<span class="fname" title="${escapeHtml(file)}（点击查看 diff）" onclick="showGitDiff('${escapeJs(file)}')">${escapeHtml(name)}${dir ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(dir)}</span>` : ''}</span>`;
+  };
+  const parts = [];
+  // staged 区：勾选框状态 = git 真实暂存状态（已暂存默认勾上，取消勾选即 unstage）；组标题带「全选」
+  if (staged.length) {
+    parts.push(gitSectionTitleWithAll('待提交(已暂存)', staged.length, 'staged'));
+    parts.push(staged.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" checked onchange="onGitStagedCheck('${escapeJs(f.file)}', this.checked)" title="已暂存；取消勾选则撤销暂存">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file)}
+      </div>`).join(''));
+  }
+  // unstaged 区（更改）：未暂存默认不勾，勾选即 git add；点分区标题整组折叠/展开
+  if (unstaged.length) {
+    const folded = isGitSectionFolded('unstaged');
+    parts.push(`<div class="git-section-title foldable" onclick="toggleGitSection('unstaged')" title="${folded ? '展开' : '折叠'}更改分区">
+      <span class="caret">${folded ? '▸' : '▾'}</span>
+      <input type="checkbox" onclick="event.stopPropagation()" onchange="gitStageAll('unstaged', this.checked)" title="勾选暂存整组；取消勾选撤销整组暂存">
+      更改 <span class="cnt">${unstaged.length}</span>
+    </div>`);
+    if (!folded) parts.push(unstaged.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" onchange="onGitUnstagedCheck('${escapeJs(f.file)}', this.checked)" title="勾选暂存此文件">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file)}
+        ${f.st === 'M' ? `<button class="svn-unadd-btn git-discard-btn" title="撤销修改（git checkout：未提交改动将永久丢弃，不可恢复）" onclick="event.stopPropagation(); gitDiscardFile('${escapeJs(f.file)}')">${ICON_FILE_REVERT}</button>` : ''}
+      </div>`).join(''));
+  }
+  // untracked 区（无版本管理）：未加入版本控制的文件（勾选即 git add）；
+  // 点分区标题整组折叠/展开，默认折叠
+  if (untracked.length) {
+    const folded = isGitSectionFolded('untracked');
+    parts.push(`<div class="git-section-title foldable" onclick="toggleGitSection('untracked')" title="${folded ? '展开' : '折叠'}无版本管理分区">
+      <span class="caret">${folded ? '▸' : '▾'}</span>
+      <input type="checkbox" onclick="event.stopPropagation()" onchange="gitStageAll('untracked', this.checked)" title="勾选暂存整组；取消勾选撤销整组暂存">
+      无版本管理 <span class="cnt">${untracked.length}</span>
+    </div>`);
+    if (!folded) parts.push(untracked.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" onchange="onGitUntrackedCheck('${escapeJs(f.file)}', this.checked)" title="勾选加入版本控制（暂存）">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file)}
+      </div>`).join(''));
+  }
+  return parts.join('');
+}
+// 只重绘变更列表区（三分区），提交框与历史区 DOM 不动——勾选/取消是高频小操作，
+// 整段重渲染会让历史区跟着闪、滚动位置丢失（与 SVN 侧 renderSvnFilesArea 同思路）
+function renderGitFilesArea() {
+  const area = document.getElementById('gitFilesArea');
+  if (!area) { renderGitBody(); return; } // 尚无独立容器（工作区干净转有变更等）时兜底整段渲染
+  const body = document.getElementById('gitDrawerBody');
+  const scroll = body.scrollTop;          // 保留抽屉滚动位置
+  area.innerHTML = gitFilesAreaHtml();
+  body.scrollTop = scroll;
+  syncGitCommitBtn(); // 勾选/取消改变暂存区，提交按钮可用态随之联动
+}
+// 同步 Git 提交按钮可用态（暂存区为空 = 提交/提交并推送都禁用，与 SVN 同规则）
+function syncGitCommitBtn() {
+  const empty = !gitStatus || splitGitFiles(gitStatus.files).staged.length === 0;
+  for (const id of ['gitCommitBtn', 'gitCommitPushBtn']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = empty || !!gitCommitInFlight;
+  }
+}
 function escapeJs(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 // 勾选即操作，勾选状态 = git 暂存状态（staged 区默认勾上，unstaged/untracked 区默认不勾）。
-// 勾选/取消立即执行 git add / git reset，随后刷新 status 重渲染——勾选框永远反映真实状态，
-// 不存在前端自行维护的"勾选记忆"，重开抽屉自然恢复正确勾选。
+// 勾选/取消立即执行 git add / git reset，随后只重拉 status 并重绘变更区——
+// 勾选框永远反映真实状态，且历史区 DOM 不动（与 SVN 侧同思路）。
 async function onGitUnstagedCheck(file, checked) {
-  if (!checked) { await loadGitStatus(); return; }  // 未暂存文件不可能"取消勾选"（本就不勾），防御性刷新
+  if (!checked) { await refreshGitStatusQuiet(); return; }  // 未暂存文件不可能"取消勾选"（本就不勾），防御性刷新
   await gitStageFiles([file], false, true);
 }
 async function onGitUntrackedCheck(file, checked) {
   // 未跟踪文件勾选 = git add（加入版本控制）；取消勾选后文件回到未跟踪态（git 不支持 add 的逆操作）
-  if (!checked) { await loadGitStatus(); return; }
+  if (!checked) { await refreshGitStatusQuiet(); return; }
   await gitStageFiles([file], false, true);
 }
 async function onGitStagedCheck(file, checked) {
   // 已暂存文件取消勾选 = 撤销暂存
-  if (checked) { await loadGitStatus(); return; }   // 已暂存文件不可能再"勾选"，防御性刷新
+  if (checked) { await refreshGitStatusQuiet(); return; }   // 已暂存文件不可能再"勾选"，防御性刷新
   await gitStageFiles([file], true, true);
+}
+// 安静刷新：重拉 git status 后只重绘变更区（历史区 DOM 不动）。
+// 工作区从"干净"变"有变更"（或反之）时 gitFilesArea 容器不存在/已移除，兜底走整段渲染
+async function refreshGitStatusQuiet() {
+  let data;
+  try {
+    data = await gitFetch('status');
+  } catch (e) {
+    showToast('刷新失败: ' + e.message, 'error');
+    return;
+  }
+  if (data.notRepo || !data.ok) { await loadGitStatus(); return; }
+  gitStatus = data;
+  if (document.getElementById('gitFilesArea')) renderGitFilesArea();
+  else renderGitBody();
 }
 async function gitStageFiles(files, unstage, refresh) {
   // 勾选是高频小操作：成功不打扰（列表即时刷新已是最直观反馈），失败才提示
@@ -4078,9 +4360,26 @@ async function gitStageFiles(files, unstage, refresh) {
       body: JSON.stringify({ files, unstage }),
     });
     if (!data.ok) { showToast('操作失败', 'error'); }
-    if (refresh) await loadGitStatus();
+    if (refresh) await refreshGitStatusQuiet();
   } catch (e) {
     showToast('操作失败', 'error');
+  }
+}
+// 撤销单文件本地修改（git checkout -- file，不可逆丢弃未提交改动）：
+// 更改区 M 状态行尾 ↩ 按钮触发，二次确认后执行（与 SVN 撤回交互一致）
+async function gitDiscardFile(file) {
+  const ok = await showConfirm(`确认撤销对 ${file} 的本地修改？\n未提交的改动将永久丢弃，此操作不可恢复。`, '撤销修改（git checkout）');
+  if (!ok) return;
+  try {
+    const data = await gitFetch('discard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file }),
+    });
+    if (!data.ok) { showToast(data.msg || '撤销失败', 'error'); return; }
+    await refreshGitStatusQuiet();
+  } catch (e) {
+    showToast('撤销失败: ' + e.message, 'error');
   }
 }
 // 分支面板中点击某本地分支切换；成功收起面板，失败保持面板便于重试
@@ -4128,6 +4427,26 @@ async function gitNetwork(route, label) {
     setNetDisabled(false);
   }
 }
+// 提交按钮忙碌态：两个按钮都禁用，被点的那个转圈圈（提交并推送时圈转完整个提交流程）。
+// gitCommitInFlight 记录在途按钮 id：loadGitStatus 整段重渲染会重建按钮节点，
+// 渲染时据此恢复忙碌态（否则「提交并推送」转圈在 push 阶段重渲染后消失）。
+let gitCommitInFlight = null;
+function setGitCommitBusy(btnId, busy) {
+  gitCommitInFlight = busy ? btnId : null;
+  applyGitCommitBusy();
+}
+function applyGitCommitBusy() {
+  const commitBtn = document.getElementById('gitCommitBtn');
+  const pushBtn = document.getElementById('gitCommitPushBtn');
+  const ta = document.getElementById('gitCommitMsg');
+  // 暂存区为空同样视为不可用（与 syncGitCommitBtn 同规则）
+  const stageEmpty = !gitStatus || splitGitFiles(gitStatus.files).staged.length === 0;
+  for (const b of [commitBtn, pushBtn]) if (b) b.disabled = !!gitCommitInFlight || stageEmpty;
+  if (ta) ta.disabled = !!gitCommitInFlight;
+  const active = gitCommitInFlight === 'gitCommitBtn' ? commitBtn
+    : gitCommitInFlight === 'gitCommitPushBtn' ? pushBtn : null;
+  for (const b of [commitBtn, pushBtn]) if (b) b.classList.toggle('busy', b === active);
+}
 // 提交（andPush=true 时提交后接着推送）：推送失败不影响"已提交"的既成事实，分别提示。
 // 提交并推送时不先刷状态再推送——否则中间态会渲染出 ahead 徽标/「未推送」标记
 // （推送在途的假象，误导用户再点推送），等推送结束后统一刷新一次。
@@ -4135,6 +4454,8 @@ async function gitCommit(andPush) {
   const ta = document.getElementById('gitCommitMsg');
   const message = ta ? ta.value.trim() : '';
   if (!message) { showToast('提交说明不能为空', 'warning'); return; }
+  const btnId = andPush ? 'gitCommitPushBtn' : 'gitCommitBtn';
+  setGitCommitBusy(btnId, true);
   try {
     const data = await gitFetch('commit', {
       method: 'POST',
@@ -4150,6 +4471,8 @@ async function gitCommit(andPush) {
     }
   } catch (e) {
     showToast('提交失败', 'error');
+  } finally {
+    setGitCommitBusy(btnId, false);
   }
 }
 // 非仓库占位页「初始化仓库」：确认后 git init，成功重渲染抽屉进入空仓库状态（无成功 toast）
@@ -4428,6 +4751,490 @@ async function showGitDiffModal(query, title) {
 function closeGitDiffModal() {
   document.getElementById('gitDiffOverlay').classList.remove('show');
 }
+
+// ---------- SVN 面板（Git 抽屉自动识别 .svn 工作副本后渲染） ----------
+// 与 Git 共用抽屉壳/CSS/diff 弹窗；状态与操作走 /api/projects/:id/svn/*。
+// SVN 没有暂存区——「待提交」是前端模拟的提交清单：勾选「更改/无版本管理」区文件移入
+// 待提交（svn add 对 ? 文件是真实操作，其余纯前端记录），取消勾选必须移出待提交
+//（A 与 M 等都回「更改」区）。提交只提交待提交区文件，提交成功清空。
+// 撤回以单文件 revert 为粒度（不可逆，弹确认）；提交即推送远端。
+let svnStatus = null;        // { rev, url, lastChangedAuthor, lastChangedDate, files:[{st,file}] }
+let svnLogCache = [];
+let svnNetInFlight = false;  // update 在途标记（update 与提交互斥，防重复点击）
+
+// ---------- 远端待更新检测（更新按钮徽标） ----------
+// svn log -r BASE:HEAD 联网比对远端，返回本地未更新的提交条数（behind），烘在
+// 「更新」按钮上；口径与历史区「未更新」徽标一致（revision > 本地基准版本）。
+// 触发点与 Git 侧 fetch 一致：打开抽屉自动检测（1 分钟节流）+ 手动刷新 force 绕过。
+// 静默执行：失败（离线/凭证未缓存）不打扰，无数字 = 不渲染徽标。
+const SVN_REMOTE_CHECK_THROTTLE_MS = 60 * 1000;
+const svnRemoteCheckLastAt = new Map();   // projectId -> 上次检测时间戳
+let svnRemoteCheckInFlight = false;
+function svnRemoteCheckThrottled(force) {
+  const pid = gitDrawerProjectId;
+  if (!pid) return;
+  const last = svnRemoteCheckLastAt.get(pid) || 0;
+  if (!force && Date.now() - last < SVN_REMOTE_CHECK_THROTTLE_MS) return;
+  if (svnRemoteCheckInFlight) return;
+  svnRemoteCheckInFlight = true;
+  svnRemoteCheckLastAt.set(pid, Date.now());
+  svnFetch('remote-status')
+    .then((data) => {
+      if (!data.ok || !gitDrawerOpen || gitRepoKind !== 'svn') return;
+      // remote-status 返回比 BASE 新的版本号列表（revs）：排除本面板自己提交的
+      // 版本后再算 behind——svn commit 只提升文件版本不动根目录 BASE，自己的
+      // 提交会被旧口径误计入「未更新」
+      const baseRev = svnStatus ? parseInt(svnStatus.rev, 10) : NaN;
+      svnStatus.behind = svnRealBehind(data.revs, Number.isFinite(baseRev) ? baseRev : null);
+      if (svnStatus.behind == null) svnStatus.behind = data.behind;
+      updateSvnBehindBadge();
+    })
+    .catch(() => {})
+    .finally(() => { svnRemoteCheckInFlight = false; });
+}
+// 检测完成后只更新「更新」按钮的 behind 徽标：不做整段 renderSvnBody，
+// 避免清空 body 导致闪烁、提交说明丢失、历史区滚动位置重置
+function updateSvnBehindBadge() {
+  const row = document.querySelector('#gitDrawerBody .git-net-row');
+  if (!row) return;
+  const btn = row.querySelector('[data-net="update"]');
+  if (!btn) return;
+  const n = svnStatus ? svnStatus.behind : null;
+  btn.innerHTML = `更新${n ? `<span class="git-ab behind" title="远端有 ${n} 个未更新提交">${n}</span>` : ''}`;
+}
+
+// 模拟暂存区：Set<file>，按项目持久化到 localStorage（刷新/重开抽屉不丢）。
+// 每次 status 刷新后与最新变更列表求交集——文件被外部 revert/删掉自动剔除。
+const SVN_STAGED_KEY = 'svnStagedByProject';
+function svnStagedLoad() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SVN_STAGED_KEY) || '{}');
+    return new Set(all[gitDrawerProjectId] || []);
+  } catch (e) { return new Set(); }
+}
+function svnStagedSave(set) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SVN_STAGED_KEY) || '{}');
+    if (set.size) all[gitDrawerProjectId] = [...set];
+    else delete all[gitDrawerProjectId];
+    localStorage.setItem(SVN_STAGED_KEY, JSON.stringify(all));
+  } catch (e) { /* 存储异常不影响功能，仅本次不持久化 */ }
+}
+let svnStaged = svnStagedLoad();
+function svnStagedReset() {
+  svnStaged = new Set();
+  svnStagedSave(svnStaged);
+}
+// 本面板提交成功的版本号：Set<rev字符串>，按项目持久化到 localStorage。
+// 用途：svn commit 只提升被提交文件的版本，工作副本根目录 BASE 不变，导致自己
+// 刚提交的记录 rev > BASE 被误算进「未更新」（更新按钮 behind 数 + 历史区徽标）。
+// 判定「未更新」时排除这些版本号；status 加载后剪掉 ≤ BASE 的失效条目。
+// 外部工具（TortoiseSVN 等）提交的版本号无法识别，那部分维持原口径。
+const SVN_OWN_REVS_KEY = 'svnOwnRevsByProject';
+function svnOwnRevsLoad() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SVN_OWN_REVS_KEY) || '{}');
+    return new Set(all[gitDrawerProjectId] || []);
+  } catch (e) { return new Set(); }
+}
+function svnOwnRevsSave(set) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SVN_OWN_REVS_KEY) || '{}');
+    if (set.size) all[gitDrawerProjectId] = [...set];
+    else delete all[gitDrawerProjectId];
+    localStorage.setItem(SVN_OWN_REVS_KEY, JSON.stringify(all));
+  } catch (e) { /* 存储异常不影响功能，仅本次不持久化 */ }
+}
+let svnOwnRevs = svnOwnRevsLoad();
+function svnOwnRevsAdd(rev) {
+  if (!rev) return;
+  svnOwnRevs.add(String(rev));
+  svnOwnRevsSave(svnOwnRevs);
+}
+// 剪掉 ≤ 当前 BASE 的记录版本：update 后这些条目自然失效，防集合无限增长
+function svnOwnRevsPrune(baseRev) {
+  if (!Number.isFinite(baseRev) || !svnOwnRevs.size) return;
+  const next = new Set([...svnOwnRevs].filter(r => parseInt(r, 10) > baseRev));
+  if (next.size !== svnOwnRevs.size) { svnOwnRevs = next; svnOwnRevsSave(svnOwnRevs); }
+}
+// 当前项目真实 behind：远端比 BASE 新的版本号里排除本面板自己提交的
+function svnRealBehind(remoteRevs, baseRev) {
+  if (!Array.isArray(remoteRevs)) return null; // 老格式（只有数字）按原值展示
+  return remoteRevs.filter(r => !svnOwnRevs.has(String(r)) && (baseRev == null || parseInt(r, 10) > baseRev)).length;
+}
+// 状态刷新后与最新变更列表求交集，剔除已不存在的文件；返回是否发生变化
+function svnStagedPrune(currentFiles) {
+  const alive = new Set(currentFiles.map(f => f.file));
+  const next = new Set([...svnStaged].filter(f => alive.has(f)));
+  if (next.size !== svnStaged.size) {
+    svnStaged = next;
+    svnStagedSave(svnStaged);
+    return true;
+  }
+  return false;
+}
+function svnStagedToggle(file, on) {
+  on ? svnStaged.add(file) : svnStaged.delete(file);
+  svnStagedSave(svnStaged);
+}
+
+// SVN status st 状态 → 展示分组（分区归属再经 svnStaged 叠加，见 svnFilesAreaHtml）：
+//   M/D/R/C/! 已版本控制变更 →「更改」；A 已 add 未暂存 →「更改」；? 未版本控制 →「无版本管理」
+function svnSplitFiles(files) {
+  const changed = [];     // M/D/R/C/! 等已版本控制变更
+  const added = [];       // A：已 add 未提交
+  const unversioned = []; // ?：未版本控制（组标题显示「无版本管理」）
+  for (const f of files) {
+    if (f.st === '?') unversioned.push({ file: f.file, st: '?' });
+    else if (f.st === 'A') added.push({ file: f.file, st: 'A' });
+    else changed.push({ file: f.file, st: f.st });
+  }
+  return { changed, added, unversioned };
+}
+// A 条目可见性过滤（渲染与整组暂存共用）：
+//   1) 有子文件也是 A（其他 A 条目以它为前缀）→ 目录条目隐藏，子文件代表一切
+//   2) 子文件全部撤销 add（回 ? 在 unversioned 里）→ 残留「A 目录」条目隐藏
+//     （revert 文件不动目录的 add 状态，svn status 仍会报目录，但自身无内容可提交）
+//   3) add 过的空目录（无任何子条目）→ 保留，否则无法勾选提交它
+function visibleAddedEntries(added, unversioned) {
+  return added.filter(f => {
+    if (added.some(o => o !== f && o.file.startsWith(f.file + '/'))) return false; // 情形 1
+    if (unversioned.some(u => u.file.startsWith(f.file + '/'))) return false;      // 情形 2
+    return true; // 情形 3
+  });
+}
+async function svnFetch(route, opts) {
+  const proj = projects.find(x => x.id === gitDrawerProjectId);
+  if (!proj) throw new Error('未选择项目');
+  const resp = await fetch(`/api/projects/${proj.id}/svn/${route}`, opts);
+  const data = await resp.json();
+  return data;
+}
+// SVN 面板整段渲染。头部：URL + 当前版本；中部：update/三分区变更列表/提交框；尾部：历史。
+// 变更列表区包在独立容器 svnFilesArea 里：勾选/移出只重绘该容器（renderSvnFilesArea），
+// 提交框与历史区 DOM 不动——历史不闪、滚动位置不丢。
+function renderSvnBody() {
+  const body = document.getElementById('gitDrawerBody');
+  if (!body || !svnStatus) return;
+  const { rev, url, files } = svnStatus;
+  const parts = [];
+  // 头部：仓库 URL（截断显示，title 全文）+ 当前版本
+  parts.push(`<div class="git-branch-row">
+    <span class="git-branch-name" style="cursor:default" title="${escapeHtml(url || '')}">${ICON_GIT_BRANCH}${escapeHtml(url ? url.replace(/^https?:\/\//, '').slice(-40) : 'SVN 工作副本')}</span>
+    <span style="color:#86909c;font-size:11px;flex-shrink:0">r${escapeHtml(rev || '?')}</span>
+  </div>`);
+  // update 行：svn update 拉取远端最新（提交即推送，无需推送按钮）。
+  // behind 徽标（本地未更新的提交条数）来自后台检测，初始不渲染
+  parts.push(`<div class="git-net-row">
+    <button data-net="update" onclick="svnUpdate()" ${svnNetInFlight ? 'disabled' : ''}>更新${svnStatus.behind ? `<span class="git-ab behind" title="远端有 ${svnStatus.behind} 个未更新提交">${svnStatus.behind}</span>` : ''}</button>
+  </div>`);
+  if (!files.length) {
+    svnStagedReset(); // 工作区干净：清空模拟暂存区（残余条目全是失效数据）
+    parts.push('<div class="git-empty">工作区干净，没有变更</div>');
+  } else {
+    // 提交区：只提交已暂存区文件；暂存区为空时禁用提交按钮
+    parts.push(`<div class="git-commit-area">
+      <textarea id="svnCommitMsg" placeholder="提交说明（必填）" rows="2" ${svnCommitInFlight ? 'disabled' : ''}></textarea>
+      <div class="git-commit-btns">
+        <button class="git-commit-btn${svnCommitInFlight ? ' busy' : ''}" id="svnCommitBtn" onclick="svnCommit()" ${svnStaged.size && !svnCommitInFlight ? '' : 'disabled'}>提交</button>
+      </div>
+    </div>`);
+    parts.push(`<div id="svnFilesArea">${svnFilesAreaHtml()}</div>`);
+  }
+  parts.push('<div class="git-section-title history">提交历史</div>');
+  parts.push('<div id="svnLogList"><div class="git-loading">加载中…</div></div>');
+  body.innerHTML = parts.join('');
+}
+// 只重绘变更列表区（三分区 + 冲突提示），提交框与历史区 DOM 不动——
+// 勾选/移出是高频小操作，整段重渲染会让历史区跟着闪。
+function renderSvnFilesArea() {
+  const area = document.getElementById('svnFilesArea');
+  if (!area) { renderSvnBody(); return; } // 尚无独立容器（旧结构）时兜底整段渲染
+  const body = document.getElementById('gitDrawerBody');
+  const scroll = body.scrollTop;          // 保留抽屉滚动位置
+  area.innerHTML = svnFilesAreaHtml();
+  body.scrollTop = scroll;
+  syncSvnCommitBtn();
+}
+// 变更列表区 HTML（三分区 + 冲突提示），renderSvnBody 与 renderSvnFilesArea 共用
+function svnFilesAreaHtml() {
+  const files = svnStatus ? svnStatus.files : [];
+  const { changed, added, unversioned } = svnSplitFiles(files);
+  // A 目录条目冗余过滤（规则见 visibleAddedEntries）
+  const addedFiles = visibleAddedEntries(added, unversioned);
+  // 三分区：待提交（svnStaged 清单）/ 更改（M/D/R/C/! 与未暂存的 A）/ 无版本管理（?）。
+  // 未暂存的 A 归「更改」而非「无版本管理」：勾选 add 后取消提交的文件仍是 A，
+  // 语义上是"已纳管待提交的变更"，行尾 ↩ 撤销版本控制后才回 ? 进无版本管理区。
+  const staged = [];
+  const modified = [];
+  const newly = [];
+  const inStaged = (f) => svnStaged.has(f.file);
+  for (const f of changed) (inStaged(f) ? staged : modified).push(f);
+  for (const f of addedFiles) (inStaged(f) ? staged : modified).push(f);
+  for (const f of unversioned) (inStaged(f) ? staged : newly).push(f);
+  const fileCell = (file, showDiff) => {
+    const slash = file.lastIndexOf('/');
+    const name = slash >= 0 ? file.slice(slash + 1) : file;
+    const dir = slash >= 0 ? file.slice(0, slash) : '';
+    const click = showDiff ? ` onclick="showSvnDiff('${escapeJs(file)}')"` : '';
+    return `<span class="fname" title="${escapeHtml(file)}"${click}>${escapeHtml(name)}${dir ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(dir)}</span>` : ''}</span>`;
+  };
+  const parts = [];
+  // 待提交区：提交清单。条目前勾选框（默认勾上，取消勾选必须移出待提交——
+  // A 文件回「更改」区、M 等回「更改」区），样式与更改/无版本管理分区一致；
+  // 标题左侧勾选框 = 全部移出（整组取消勾选）；A 文件行尾另有撤销 add 图标；点文件名看 diff
+  if (staged.length) {
+    parts.push(`<div class="git-section-title">
+      <input type="checkbox" checked onchange="svnUnstageAll()" title="全部移出待提交（整组取消勾选）">
+      待提交 <span class="cnt">${staged.length}</span>
+    </div>`);
+    parts.push(staged.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" checked onchange="onSvnUnstage('${escapeJs(f.file)}')" title="已加入提交清单；取消勾选则移出">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file, f.st !== 'D' && f.st !== '!')}
+        ${f.st === 'A' ? `<button class="svn-unadd-btn" title="撤销版本控制（svn revert：文件回到无版本管理状态，内容不受影响）" onclick="event.stopPropagation(); svnUnversionFile('${escapeJs(f.file)}')">↩</button>` : ''}
+      </div>`).join(''));
+  }
+  // 更改区：已版本控制的未暂存变更（含未提交的 A），勾选 = 暂存（移入待提交区）；
+  // A 文件行尾有撤销 add 图标；点文件名看 diff；点分区标题整组折叠/展开
+  if (modified.length) {
+    const folded = isSvnSectionFolded('modified');
+    parts.push(`<div class="git-section-title foldable" onclick="toggleSvnSection('modified')" title="${folded ? '展开' : '折叠'}更改分区">
+      <span class="caret">${folded ? '▸' : '▾'}</span>
+      <input type="checkbox" onclick="event.stopPropagation()" onchange="svnStageAllGroup('modified', this.checked)" title="勾选暂存整组">
+      更改 <span class="cnt">${modified.length}</span>
+    </div>`);
+    if (!folded) parts.push(modified.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" onchange="onSvnStage('${escapeJs(f.file)}', this.checked)" title="勾选暂存此文件（进入提交清单）">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file, f.st !== 'D' && f.st !== '!')}
+        ${f.st === 'M' ? `<button class="svn-unadd-btn git-discard-btn" title="撤销修改（svn revert：未提交改动将永久丢弃，不可恢复）" onclick="event.stopPropagation(); svnRevertFile('${escapeJs(f.file)}')">${ICON_FILE_REVERT}</button>` : ''}
+        ${f.st === 'A' ? `<button class="svn-unadd-btn" title="撤销版本控制（svn revert：文件回到无版本管理状态，内容不受影响）" onclick="event.stopPropagation(); svnUnversionFile('${escapeJs(f.file)}')">↩</button>` : ''}
+      </div>`).join(''));
+  }
+  // 无版本管理区：? 未版本控制 + 未暂存的 A。勾选 = svn add（? 文件真实 add；A 跳过）并移入暂存区；
+  // 点分区标题整组折叠/展开，默认折叠
+  if (newly.length) {
+    const folded = isSvnSectionFolded('newly');
+    parts.push(`<div class="git-section-title foldable" onclick="toggleSvnSection('newly')" title="${folded ? '展开' : '折叠'}无版本管理分区">
+      <span class="caret">${folded ? '▸' : '▾'}</span>
+      <input type="checkbox" onclick="event.stopPropagation()" onchange="svnStageAllGroup('newly', this.checked)" title="勾选暂存整组（未版本控制文件会先 svn add）">
+      无版本管理 <span class="cnt">${newly.length}</span>
+    </div>`);
+    if (!folded) parts.push(newly.map(f => `
+      <div class="git-file-row svn-child">
+        <input type="checkbox" onchange="onSvnStageNew('${escapeJs(f.file)}', this.checked)" title="勾选加入提交清单（未版本控制文件会先 svn add）">
+        ${gitStBadge(f.st)}
+        ${fileCell(f.file, f.st !== '?')}
+      </div>`).join(''));
+  }
+  // 冲突提示：C 状态文件需要手工解决（本面板不做交互式解决）
+  const conflicts = files.filter(f => f.st === 'C');
+  if (conflicts.length) {
+    parts.push(`<div class="git-remote-hint">有 ${conflicts.length} 个冲突文件（标记 C）：请在编辑器中处理 &lt;&lt;&lt;&lt;&lt;&lt;&lt; 标记后重新提交；或用终端执行 svn resolve。</div>`);
+  }
+  return parts.join('');
+}
+// 同步提交按钮可用态（已暂存区为空 = 禁用）
+function syncSvnCommitBtn() {
+  const btn = document.getElementById('svnCommitBtn');
+  if (btn) btn.disabled = svnStaged.size === 0;
+}
+// 历史区单独重渲染（不整段刷新 body，避免勾选/滚动位置丢失）
+function renderSvnLog() {
+  const el = document.getElementById('svnLogList');
+  if (!el) return;
+  if (!svnLogCache.length) { el.innerHTML = '<div class="git-empty">暂无提交</div>'; return; }
+  // 本地工作副本基准版本：rev 更大的历史条目 = 尚未 update 到本地的提交，
+  // 标「未更新」徽标。本地 rev 缺失/非法（r?）时不标，避免误标。
+  const localRev = svnStatus ? parseInt(svnStatus.rev, 10) : NaN;
+  el.innerHTML = svnLogCache.map(c => {
+    const expanded = c._exp;
+    const filesHtml = expanded ? `
+      <div class="git-log-files">
+        ${c.files && c.files.length
+          ? c.files.map(pf => `
+            <div class="git-log-file" onclick="event.stopPropagation(); showSvnCommitFileDiff('${escapeHtml(c.rev)}', '${escapeJs(pf.file)}')" title="${escapeHtml(pf.file)}（点击查看该版本 diff）">
+              <span class="git-log-file-name">${pf.action}</span>
+              <span class="git-log-file-name">${escapeHtml(pf.file.includes('/') ? pf.file.slice(pf.file.lastIndexOf('/') + 1) : pf.file)}</span>${pf.file.includes('/') ? `<span class="dir">&nbsp;-&nbsp;${escapeHtml(pf.file.slice(0, pf.file.lastIndexOf('/')))}</span>` : ''}
+            </div>`).join('')
+          : '<div class="git-log-file-empty">无文件变更</div>'}
+      </div>` : '';
+    const outdated = Number.isFinite(localRev) && parseInt(c.rev, 10) > localRev
+      && !svnOwnRevs.has(String(c.rev)); // 本面板自己提交的版本文件已在本地，不标「未更新」
+    return `
+    <div class="git-log-item">
+      <div class="git-log-row ${expanded ? 'expanded' : ''}" onclick="toggleSvnLogExpand(${svnLogCache.indexOf(c)})">
+        <div class="subj" title="${escapeHtml(c.subject)}">${escapeHtml(c.subject)}</div>
+        <div class="meta">
+          <span class="hash">r${escapeHtml(c.rev)}</span>
+          <span>${escapeHtml(c.author)}</span>
+          <span>${gitRelTime(c.at)}</span>
+          ${outdated ? '<span class="svn-outdated-badge" title="尚未更新到本地工作副本">未更新</span>' : ''}
+          ${c.files && c.files.length ? `<span class="cnt">${c.files.length}</span>` : ''}
+        </div>
+      </div>
+      ${filesHtml}
+    </div>`;
+  }).join('');
+}
+function toggleSvnLogExpand(idx) {
+  if (svnLogCache[idx]) svnLogCache[idx]._exp = !svnLogCache[idx]._exp;
+  renderSvnLog();
+}
+async function loadSvnLog() {
+  const el = document.getElementById('svnLogList');
+  if (!el) return;
+  let data;
+  try {
+    data = await svnFetch('log?limit=30');
+  } catch (e) {
+    el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (!data.ok) { el.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'svn log 失败')}</div>`; return; }
+  svnLogCache = data.commits;
+  renderSvnLog();
+}
+// svn update：成功不提示（版本号/状态刷新即反馈），失败 toast
+async function svnUpdate() {
+  if (svnNetInFlight) return;
+  svnNetInFlight = true;
+  const btn = document.querySelector('#gitDrawerBody .git-net-row button[data-net="update"]');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await svnFetch('update', { method: 'POST' });
+    if (!data.ok) showToast(`更新失败: ${data.msg || ''}`, 'error');
+    // 更新成功无需清徽标：下方 loadGitStatus 用全新 status 替换 svnStatus
+    //（不含 behind），重渲染后徽标自然消失；刷新按钮会再检测出真实值
+    await loadGitStatus(); // 重走类型探测 + SVN/Git 渲染分发
+  } catch (e) {
+    showToast('更新失败: ' + e.message, 'error');
+    svnNetInFlight = false;
+    if (btn) btn.disabled = false;
+  }
+  svnNetInFlight = false;
+}
+// 提交：只提交已暂存区文件（按钮在暂存区为空时已禁用，此处兜底校验）。
+// SVN 提交即推送远端。提交成功清空模拟暂存区（所有已暂存文件都进这次提交）。
+// 在途时按钮禁用 + 转圈圈、说明输入框禁用（svnCommitInFlight 供重渲染恢复忙碌态）
+let svnCommitInFlight = false;
+async function svnCommit() {
+  const ta = document.getElementById('svnCommitMsg');
+  const message = ta ? ta.value.trim() : '';
+  if (!message) { showToast('提交说明不能为空', 'warning'); return; }
+  const files = [...svnStaged];
+  if (!files.length) { showToast('请先暂存要提交的文件', 'warning'); return; }
+  svnCommitInFlight = true;
+  setSvnCommitBusy(true);
+  try {
+    const data = await svnFetch('commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, files }),
+    });
+    if (!data.ok) { showToast(data.msg || '提交失败', 'error'); return; }
+    // 提交返回但没产生新版本（rev 为空）：说明实际什么都没提交（文件已在别处提交过、
+    // 内容无差异等）。这不是成功，提示用户，避免"提交了但历史没变"的困惑。
+    if (!data.rev) { showToast('未产生新提交：暂存的文件没有需要提交的内容变更', 'warning'); return; }
+    svnOwnRevsAdd(data.rev); // 记录本面板提交的版本号，未更新判定时排除
+    svnStagedReset();
+    svnLogCache = [];
+    await loadGitStatus();
+  } catch (e) {
+    showToast('提交失败: ' + e.message, 'error');
+  } finally {
+    svnCommitInFlight = false;
+    setSvnCommitBusy(false);
+  }
+}
+// SVN 提交按钮忙碌态：按钮禁用 + 转圈、说明输入框禁用（loadGitStatus 整段重渲染会
+// 重建节点，渲染层据 svnCommitInFlight 恢复忙碌态，圈转到流程结束）
+function setSvnCommitBusy(busy) {
+  const btn = document.getElementById('svnCommitBtn');
+  const ta = document.getElementById('svnCommitMsg');
+  if (btn) { btn.disabled = busy || svnStaged.size === 0; btn.classList.toggle('busy', busy); }
+  if (ta) ta.disabled = busy;
+}
+// 单文件撤回（svn revert，不可逆丢弃本地改动）：右键变更文件触发，二次确认后执行
+async function svnRevertFile(file) {
+  const ok = await showConfirm(`确认撤回对 ${file} 的本地修改？\n未提交的改动将永久丢弃，此操作不可恢复。`, '撤回修改（svn revert）');
+  if (!ok) return;
+  try {
+    const data = await svnFetch('revert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [file] }),
+    });
+    if (!data.ok) { showToast(data.msg || '撤回失败', 'error'); return; }
+    await loadGitStatus();
+  } catch (e) {
+    showToast('撤回失败: ' + e.message, 'error');
+  }
+}
+// diff 复用 Git 的双栏模态框（unified diff 格式一致，parseSideBySide 通用）
+async function showSvnDiff(file) {
+  await showSvnDiffModal('file=' + encodeURIComponent(file), file);
+}
+async function showSvnCommitFileDiff(rev, file) {
+  await showSvnDiffModal(`rev=${encodeURIComponent(rev)}&file=${encodeURIComponent(file)}`, `${file} · r${rev}`);
+}
+async function showSvnDiffModal(query, title) {
+  document.getElementById('gitDiffTitle').textContent = title;
+  document.getElementById('gitDiffLoading').style.display = '';
+  document.getElementById('gitDiffLoading').textContent = '加载中…';
+  document.getElementById('gitDiffCols').style.display = 'none';
+  document.getElementById('gitDiffOverlay').classList.add('show');
+  try {
+    const data = await svnFetch('diff?' + query);
+    const loading = document.getElementById('gitDiffLoading');
+    if (!data.ok) {
+      loading.style.display = '';
+      loading.textContent = data.msg || 'svn diff 失败';
+      return;
+    }
+    if (!data.diff) {
+      loading.style.display = '';
+      loading.textContent = '（无差异）';
+      return;
+    }
+    const { left, right } = parseSideBySide(data.diff);
+    document.getElementById('gitDiffLeft').innerHTML = sideColHtml(left);
+    document.getElementById('gitDiffRight').innerHTML = sideColHtml(right);
+    loading.style.display = 'none';
+    const cols = document.getElementById('gitDiffCols');
+    cols.style.display = 'flex';
+    const l = document.getElementById('gitDiffLeft');
+    const r = document.getElementById('gitDiffRight');
+    let syncing = false;
+    l.onscroll = () => { if (syncing) return; syncing = true; r.scrollTop = l.scrollTop; r.scrollLeft = l.scrollLeft; syncing = false; };
+    r.onscroll = () => { if (syncing) return; syncing = true; l.scrollTop = r.scrollTop; l.scrollLeft = r.scrollLeft; syncing = false; };
+  } catch (e) {
+    const loading = document.getElementById('gitDiffLoading');
+    loading.style.display = '';
+    loading.textContent = '加载失败: ' + e.message;
+  }
+}
+// 变更文件右键 → 撤回入口（SVN 的撤回是单文件 revert，不同于 Git 的软撤回提交）
+// 文件名 span 的 title 即完整相对路径（fileCell 生成），据此从 svnStatus 反查状态分流：
+//   M/D/R/C/! →「撤回本地修改」：revert 丢弃未提交改动，内容不可恢复（弹确认）
+//   A         → 行尾 ↩ 图标按钮「撤销版本控制」，不走右键（右键误触风险高）
+//   ?（无版本管理区）→ 无右键菜单（revert 对未版本控制文件无意义）
+document.addEventListener('contextmenu', (e) => {
+  if (gitRepoKind !== 'svn' || !svnStatus) return;
+  const row = e.target.closest && e.target.closest('#gitDrawerBody .git-file-row');
+  if (!row) return;
+  const fname = row.querySelector('.fname');
+  if (!fname) return;
+  // 全局自绘 tooltip 会把 title 改名为 data-tip，优先读 data-tip（title 仅兜底）
+  const file = fname.getAttribute('data-tip') || fname.getAttribute('title');
+  const entry = svnStatus.files.find(f => f.file === file);
+  if (!entry || entry.st === '?' || entry.st === 'A') return;
+  e.preventDefault();
+  svnRevertFile(file);
+});
 
 // ---------- 文件编辑器窗口（多 tab + 行内编辑） ----------
 // 文件抽屉点击文件行弹出：highlight.js 语法高亮 + 行号；
@@ -5318,6 +6125,69 @@ loadProjects();
 // 全局拦截浏览器原生右键菜单：页面所有右键交互走自绘菜单（分栏 tab/文件树/Git 历史），
 // 其余区域右键不应弹出浏览器默认菜单（WebView2 下显示浏览器 chrome 菜单，与面板风格不符）
 document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ---------- 全局自绘 tooltip ----------
+// 禁用原生 title 提示（约 1s 延迟、悬停期间节点重渲染替换即取消，Git/SVN 抽屉里
+// 勾选后的局部重绘是常态），改自绘：初始化时把全页 title 属性改名为 data-tip
+// （数据源不变，原生提示从此不存在）；渲染函数后续生成的 title 由 MutationObserver
+// 扫到后同样改名。mouseover 即时显示，委托在 document 上，节点替换不影响。
+(function () {
+  const tip = document.createElement('div');
+  tip.id = 'globalTip';
+  tip.style.cssText = 'position:fixed;z-index:99999;max-width:420px;padding:4px 8px;background:#1c1e21;color:#d5d7db;'
+    + 'border:1px solid #3a3c3f;border-radius:5px;font-size:11px;line-height:1.5;pointer-events:none;'
+    + 'white-space:pre-wrap;word-break:break-all;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);';
+  document.body.appendChild(tip);
+  let cur = null;
+
+  // title → data-tip 改名（初次全量 + Observer 增量都走这里）
+  function adoptTitle(el) {
+    if (!el.hasAttribute('title')) return;
+    el.setAttribute('data-tip', el.getAttribute('title'));
+    el.removeAttribute('title');
+  }
+  document.querySelectorAll('[title]').forEach(adoptTitle);
+  // 动态渲染的节点（抽屉重绘/模态等）带 title 的也即时改名
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type === 'attributes' && m.target.hasAttribute('title')) adoptTitle(m.target);
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        if (n.hasAttribute && n.hasAttribute('title')) adoptTitle(n);
+        if (n.querySelectorAll) n.querySelectorAll('[title]').forEach(adoptTitle);
+      });
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['title'] });
+
+  function hide() {
+    cur = null;
+    tip.style.display = 'none';
+  }
+  document.addEventListener('mouseover', (e) => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (t === cur) return;
+    hide();
+    if (!t) return;
+    const text = t.getAttribute('data-tip');
+    if (!text) return;
+    cur = t;
+    tip.textContent = text;
+    tip.style.display = 'block';
+    // 先显示再测量定位（display:none 时尺寸为 0）；默认在指针右下，越界翻转
+    const x = e.clientX, y = e.clientY;
+    tip.style.left = '0px'; tip.style.top = '0px';
+    const r = tip.getBoundingClientRect();
+    let left = x + 12, top = y + 16;
+    if (left + r.width > window.innerWidth - 8) left = window.innerWidth - 8 - r.width;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 10;
+    tip.style.left = Math.max(4, left) + 'px';
+    tip.style.top = Math.max(4, top) + 'px';
+  });
+  // 滚动/按下/离开窗口都收起，避免残影
+  document.addEventListener('mousedown', hide);
+  window.addEventListener('blur', hide);
+  document.addEventListener('scroll', hide, true); // 捕获阶段：任意容器滚动都收起
+})();
 </script>
 </body>
 </html>

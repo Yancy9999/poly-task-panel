@@ -1341,6 +1341,20 @@ app.post('/api/projects/:id/git/stage', async (req, res) => {
   res.json({ ok: true });
 });
 
+// 撤销单文件本地修改（丢弃未提交改动）：body { file }。不可逆（改动直接丢弃，无暂存可寻），
+// 前端弹确认框后才调用。git checkout -- <file> 恢复到暂存区/HEAD 版本。
+app.post('/api/projects/:id/git/discard', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const file = String((req.body && req.body.file) || '').trim();
+  if (!file) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  const r = await runGit(p, ['checkout', '--', file]);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '撤销修改失败' });
+  }
+  res.json({ ok: true });
+});
+
 // commit：body { message }。git commit -m 不经 shell，无注入风险。
 app.post('/api/projects/:id/git/commit', async (req, res) => {
   const p = getGitProject(req, res);
@@ -1565,6 +1579,408 @@ app.get('/api/projects/:id/git/diff', async (req, res) => {
   if (!r.ok) {
     if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
     return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'git diff 失败' });
+  }
+  res.json({ ok: true, diff: r.stdout });
+});
+
+// ---------------------------------------------------------------------------
+// SVN 集成 REST API：/api/projects/:id/svn/{status,remote-status,update,add,commit,revert,log,diff}
+// 与 git 路由平行：统一 execFile('svn', ...) 不走 shell（防注入）；文件路径参数做
+// 与 /files 相同的 resolve 沙箱化。非 SVN 工作副本（E155007/W155007）统一返回
+// { ok:false, notRepo:true }，svn 命令行不存在（ENOENT）返回 { ok:false, noSvn:true }，
+// 前端据此显示占位/安装提示。SVN 无暂存区、无分支概念：commit 即推送远端，
+// 撤回以单文件 svn revert 为粒度，凭证沿用命令行缓存（--non-interactive 不做交互）。
+// ---------------------------------------------------------------------------
+const SVN_TIMEOUT_MS = 60 * 1000; // update 等网络操作超时
+const SVN_LOG_LIMIT_MAX = 200;
+// svn 错误输出统一带 "svn: Exxxxx:" 前缀；工作副本判定走 E155007（目录非工作副本）
+// / W155007（警告变体）。中文/locale 输出靠错误码识别，不匹配文案。
+const SVN_NOT_REPO_RE = /svn: [EW]155007/;
+
+// 执行 svn 子命令。opts.sandboxRel 可传相对 projectPath 的路径用于沙箱校验
+// （diff 单文件用：只校验不切换 cwd——svn 的目标参数相对 cwd 解析，
+// 换了 cwd 传参就得相应改写，直接在项目根跑最简单），逃逸则返回 { sandbox:true }。
+function runSvn(project, args, opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    if (o.sandboxRel !== undefined && o.sandboxRel !== '') {
+      const target = path.resolve(path.join(project.projectPath, o.sandboxRel));
+      const rel = path.relative(project.projectPath, target);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        resolve({ ok: false, sandbox: true, msg: '路径超出项目目录' });
+        return;
+      }
+    }
+    const cwd = project.projectPath;
+    // --non-interactive：凭证未缓存时直接报错而不是挂起等输入（本工具无 TTY 可交互）
+    const fullArgs = ['--non-interactive', ...args];
+    execFile('svn', fullArgs, {
+      cwd,
+      windowsHide: true,
+      timeout: o.timeout || SVN_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        // svn 命令行未安装：execFile 产生 ENOENT
+        if (err.code === 'ENOENT') {
+          resolve({ ok: false, noSvn: true, msg: 'svn 命令行不可用' });
+          return;
+        }
+        const out = (stderr || '') + (stdout || '');
+        resolve({
+          ok: false,
+          notRepo: SVN_NOT_REPO_RE.test(out) || undefined,
+          code: err.code,
+          msg: (stderr || stdout || err.message || '').trim(),
+        });
+        return;
+      }
+      resolve({ ok: true, stdout: stdout || '', stderr: stderr || '' });
+    });
+  });
+}
+
+function getSvnProject(req, res) {
+  const p = getProject(req.params.id);
+  if (!p) { res.status(404).json({ ok: false, msg: '项目不存在' }); return null; }
+  if (!fs.existsSync(p.projectPath)) {
+    res.status(404).json({ ok: false, msg: '目录不存在: ' + p.projectPath });
+    return null;
+  }
+  return p;
+}
+
+// svn status 输出行格式（不带 -v：-v 的作者列宽度可变，固定列切分不适用）：
+//   M       modified
+//   A       added（svn add 过的新文件）
+//   D       deleted
+//   R       replaced（删了又加）
+//   C       conflicted
+//   ?       未版本控制
+//   !       丢失（文件被删但未 svn delete）
+// 第一列是状态，第 8 列起是路径（前 7 列是各标志位）。手动 svn add 之后
+// 状态从 ? 变 A，与 Git 抽屉「勾选加入版本控制」的交互对齐。
+function parseSvnStatus(stdout) {
+  const files = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line) continue;
+    const st = line[0];
+    let file = line.length > 8 ? line.slice(8) : '';
+    if (!file) file = line.slice(1).trim();
+    // 统一分隔符为 /（Windows 下 svn status 输出反斜杠路径，前端按 / 展示）
+    file = file.replace(/\\/g, '/');
+    files.push({ st, file });
+  }
+  return { files };
+}
+
+// 展开未版本控制（?）目录：svn status 对整个 ? 目录只报一条（与 git
+// --untracked-files=all 不同），前端「未提交列表以文件为单位」需要目录内的
+// 具体文件。用文件系统遍历展开（svn 对未版本控制节点不提供 list 能力），
+// 逐文件返回 {st:'?', file}。忽略 node_modules / .git / .svn 等噪音目录。
+const SVN_EXPAND_SKIP_DIRS = new Set(['node_modules', '.git', '.svn']);
+function expandSvnUnversionedDir(p, dirRel, out, depth) {
+  if (depth > 8) return; // 防御：异常深的嵌套不再展开
+  const abs = path.join(p.projectPath, dirRel);
+  let entries;
+  try {
+    entries = fs.readdirSync(abs, { withFileTypes: true });
+  } catch (e) {
+    return; // 目录读不到（权限等）就保留原目录条目，不再展开
+  }
+  for (const ent of entries) {
+    if (SVN_EXPAND_SKIP_DIRS.has(ent.name)) continue;
+    const rel = dirRel ? dirRel + '/' + ent.name : ent.name;
+    if (ent.isDirectory()) {
+      expandSvnUnversionedDir(p, rel, out, depth + 1);
+    } else if (ent.isFile()) {
+      out.push({ st: '?', file: rel });
+    }
+  }
+}
+
+// svn status 路由：附带 rev/url（svn info 的关键输出），前端头部一次渲染。
+// 注意先跑 info 探测工作副本：svn status 在非工作副本目录 exit 0（只输出 W155007
+// 警告到 stderr），不能作为工作副本判定依据；svn info 才会以 E155007 非零退出。
+app.get('/api/projects/:id/svn/status', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const info = await runSvn(p, ['info']);
+  if (!info.ok) {
+    if (info.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(info.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: info.msg || 'svn info 失败' });
+  }
+  const r = await runSvn(p, ['status']);
+  if (!r.ok) {
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn status 失败' });
+  }
+  const parsed = parseSvnStatus(r.stdout);
+  // ? 目录条目展开为目录内具体文件；目录本身不再出现在列表里（前端以文件为单位），
+  // 仅当目录为空（没有任何文件可展开）时保留原条目——否则空目录会从列表消失、无法勾选。
+  // 注意 Windows 上 svn status 的 ? 目录条目不带尾部斜杠（"? newpkg"），用
+  // 磁盘 stat 判定目录而非看斜杠。
+  const files = [];
+  for (const f of parsed.files) {
+    let isDir = false;
+    if (f.st === '?') {
+      try {
+        isDir = fs.statSync(path.join(p.projectPath, f.file)).isDirectory();
+      } catch (e) { /* stat 失败按文件处理 */ }
+    }
+    if (isDir) {
+      const expanded = [];
+      expandSvnUnversionedDir(p, f.file, expanded, 0);
+      if (expanded.length) {
+        files.push(...expanded);
+      } else {
+        files.push(f);
+      }
+    } else {
+      files.push(f);
+    }
+  }
+  const pick = (kv) => {
+    const mm = info.stdout.match(new RegExp('^' + kv + ': (.*)$', 'm'));
+    return mm ? mm[1].trim() : null;
+  };
+  res.json({
+    ok: true,
+    rev: pick('Revision'),
+    url: pick('URL'),
+    lastChangedAuthor: pick('Last Changed Author'),
+    lastChangedDate: pick('Last Changed Date'),
+    files,
+  });
+});
+
+// 联网比对远端仓库，返回本地未更新的提交条数（behind），仅用于「更新」按钮
+// 徽标展示，不做任何本地修改。口径与历史区「未更新」徽标一致：revision 比本地
+// 工作副本基准版本（svn info 的 Revision，即 BASE）新的 log 条目数。
+app.get('/api/projects/:id/svn/remote-status', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const info = await runSvn(p, ['info']);
+  if (!info.ok) {
+    if (info.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(info.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: info.msg || 'svn info 失败' });
+  }
+  // svn log -r BASE:HEAD 列出本地基准版本之后的提交（区间含端点，BASE 自身也会
+  // 返回，因此下面按 revision > 本地 rev 过滤掉端点条目）。
+  const pick = (kv) => {
+    const mm = info.stdout.match(new RegExp('^' + kv + ': (.*)$', 'm'));
+    return mm ? mm[1].trim() : null;
+  };
+  const baseRev = parseInt(pick('Revision'), 10) || 0;
+  const r = await runSvn(p, ['log', '--xml', '-r', 'BASE:HEAD']);
+  if (!r.ok) {
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json({ ok: false, msg: r.msg || 'svn log 失败' });
+  }
+  let behind = 0;
+  const revs = [];   // 比 BASE 新的版本号列表：前端排除本面板自己提交的版本后再算 behind
+  const entryRe = /<logentry\b[^>]*\brevision="([^"]+)"/g;
+  let m;
+  while ((m = entryRe.exec(r.stdout)) !== null) {
+    if ((parseInt(m[1], 10) || 0) > baseRev) { behind++; revs.push(parseInt(m[1], 10)); }
+  }
+  res.json({ ok: true, behind, revs });
+});
+
+// svn update：网络操作，返回合并输出供前端展示（冲突文件在 status 里以 C 呈现）
+app.post('/api/projects/:id/svn/update', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const r = await runSvn(p, ['update']);
+  if (!r.ok) {
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn update 失败' });
+  }
+  res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
+});
+
+// svn add：把未版本控制（?）文件加入版本控制。body { files: string[] }
+// 未版本控制目录内的文件不能直接 add（E150000: 父目录节点不存在）——须自顶向下：
+// 先对路径上每个尚未版本控制的父目录 --depth empty add，再 add 文件本身。
+app.post('/api/projects/:id/svn/add', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
+  if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  // 沙箱校验每个文件（与 diff 单文件同规则），逃逸直接拒绝
+  for (const f of files) {
+    const target = path.resolve(path.join(p.projectPath, f));
+    const rel = path.relative(p.projectPath, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+    }
+  }
+  // 收集所有待 add 节点（含未版本控制的父目录，深度排序保证父先于子），逐个 add
+  const nodes = new Set();
+  for (const f of files) {
+    const segs = f.replace(/\\/g, '/').split('/').filter(Boolean);
+    // 文件是最后一个段；目录段自顶向下加入（svn status 返回的 ? 文件都在工作副本内）
+    for (let i = 1; i < segs.length; i++) {
+      const parent = segs.slice(0, i).join('/');
+      nodes.add({ path: parent, depthEmpty: true }); // 占位，下面重排
+    }
+    nodes.add({ path: segs.join('/'), depthEmpty: false });
+  }
+  const ordered = [...nodes].sort((a, b) => a.path.split('/').length - b.path.split('/').length
+    || (a.depthEmpty === b.depthEmpty ? 0 : a.depthEmpty ? -1 : 1));
+  for (const n of ordered) {
+    const args = ['add'];
+    if (n.depthEmpty) args.push('--depth', 'empty');
+    args.push('--', n.path);
+    const r = await runSvn(p, args);
+    if (!r.ok) {
+      if (r.noSvn) return res.json({ ok: false, noSvn: true });
+      // 已在版本控制下的节点（W150002）跳过继续；其余错误原样返回
+      if (/W150002/.test(r.msg || '')) continue;
+      return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn add 失败' });
+    }
+  }
+  res.json({ ok: true });
+});
+
+// svn commit：body { message, files? }。SVN 无暂存区：files 为空提交全部变更，
+// 非空则只提交指定文件（相当于 Git 抽屉勾选部分文件提交的语义）。
+// 提交即推送远端，成功返回新版本号（stdout 末行的 "Committed revision N."）。
+app.post('/api/projects/:id/svn/commit', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const message = String((req.body && req.body.message) || '').trim();
+  if (!message) return res.status(400).json({ ok: false, msg: '提交说明不能为空' });
+  const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
+  // 新增（A）目录里的文件若要提交，其 A 状态祖先目录必须一起进本次提交
+  // （E200009: child is part of the commit but parent not known to exist）。
+  // 例：新目录 test/ 下 add 了 test1/ 与 test11.md，只勾文件提交会被拒——
+  // 补齐路径上所有未提交的 A 目录后按提交 svn 要求（父先于子）排序。
+  if (files.length) {
+    const addedDirs = new Set((await runSvn(p, ['status'])).stdout
+      .split(/\r?\n/).map(l => l[0] === 'A' ? l.slice(8).replace(/\\/g, '/').trim() : '')
+      .filter(Boolean));
+    const needed = new Set();
+    for (const f of files) {
+      const segs = f.replace(/\\/g, '/').split('/');
+      for (let i = 1; i < segs.length; i++) {
+        const dir = segs.slice(0, i).join('/');
+        if (addedDirs.has(dir)) needed.add(dir);
+      }
+    }
+    for (const d of needed) files.push(d);
+    files.sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1));
+  }
+  // --force-log：说明文本恰好与工作区内文件名相同时（如提交某文件的改动用了文件名
+  // 当说明），svn 默认按"疑似把路径当消息"拒绝（E205000），此开关明确告知就是日志
+  const args = ['commit', '--force-log', '-m', message];
+  if (files.length) args.push('--', ...files);
+  const r = await runSvn(p, args);
+  if (!r.ok) {
+    if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || '提交失败' });
+  }
+  const m = r.stdout.match(/Committed revision (\d+)\./);
+  res.json({ ok: true, rev: m ? m[1] : null, msg: (r.stdout + '\n' + r.stderr).trim() });
+});
+
+// svn revert：撤销本地未提交修改（含未提交的 add）。body { files: string[] }。
+// 不可逆（本地改动直接丢弃），前端弹确认框后才调用。
+app.post('/api/projects/:id/svn/revert', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
+  if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  const r = await runSvn(p, ['revert', '--depth', 'infinity', '--'].concat(files));
+  if (!r.ok) {
+    if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'revert 失败' });
+  }
+  res.json({ ok: true });
+});
+
+// 提交历史：svn log -v --xml 解析成 JSON。--xml 避免 locale 文案差异，
+// 结构固定：<logentry revision author date><msg>..<paths><path action>..</path></paths></logentry>
+// -r HEAD:0 降序 + -l N 取最新 N 条（limit 作用于遍历起点一端，必须从 HEAD 端截），
+// 返回即最新在前。工作副本落后远端（mixed-revision / 未 update）时，不带 -r 的 log
+// 只从工作副本的 BASE 往回看，会漏掉远端新提交；HEAD 始终看仓库全量。
+app.get('/api/projects/:id/svn/log', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  let limit = parseInt(req.query.limit, 10);
+  if (!(limit > 0)) limit = 30;
+  if (limit > SVN_LOG_LIMIT_MAX) limit = SVN_LOG_LIMIT_MAX;
+  const r = await runSvn(p, ['log', '-v', '--xml', `-l${limit}`, '-r', 'HEAD:0']);
+  if (!r.ok) {
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn log 失败' });
+  }
+  const commits = [];
+  // 逐条 logentry 切分：属性（revision/author/date）+ <msg> + <paths> 下的 <path>
+  const entryRe = /<logentry\b([^>]*)>([\s\S]*?)<\/logentry>/g;
+  let em;
+  while ((em = entryRe.exec(r.stdout)) !== null) {
+    const attrs = em[1];
+    const body = em[2];
+    const revM = attrs.match(/\brevision="([^"]+)"/);
+    const authorM = body.match(/<author>([\s\S]*?)<\/author>/);
+    const dateM = body.match(/<date>([\s\S]*?)<\/date>/);
+    const msgM = body.match(/<msg>([\s\S]*?)<\/msg>/);
+    const paths = [];
+    const pathRe = /<path\b([^>]*)>([\s\S]*?)<\/path>/g;
+    let pm;
+    while ((pm = pathRe.exec(body)) !== null) {
+      const actM = pm[1].match(/\baction="([^"]+)"/);
+      paths.push({ action: actM ? actM[1] : '', file: pm[2].trim() });
+    }
+    commits.push({
+      rev: revM ? revM[1] : '',
+      author: authorM ? decodeXmlEntities(authorM[1]) : '',
+      // svn 的 date 是 ISO8601 带毫秒与 Z（如 2026-08-31T12:34:56.789Z），转秒级时间戳
+      at: dateM ? (new Date(decodeXmlEntities(dateM[1])).getTime() / 1000 || 0) : 0,
+      subject: msgM ? decodeXmlEntities(msgM[1]) : '',
+      files: paths,
+    });
+  }
+  // HEAD:0 降序输出即最新在前，直接按序返回（前端按数组序渲染）
+  res.json({ ok: true, commits });
+});
+
+// XML 实体反转义（svn log --xml 对 & < > 等转义；解码仅用于展示文本，不拼 HTML）
+function decodeXmlEntities(s) {
+  return String(s)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// diff：query file（相对 projectPath 的文件路径，沙箱化）、rev=<N>（看某次提交的变更）。
+// 均未传时为工作区整体 diff（工作区与 BASE 对比）。unified 格式，前端复用 Git 的
+// parseSideBySide 双栏解析。
+app.get('/api/projects/:id/svn/diff', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const file = req.query.file ? String(req.query.file) : '';
+  const rev = req.query.rev ? String(req.query.rev) : '';
+  if (rev && !/^\d+$/.test(rev)) {
+    return res.status(400).json({ ok: false, msg: '非法的版本号' });
+  }
+  const args = ['diff', '--internal-diff'];
+  if (rev) {
+    // 看某次提交自身的变更：-c <rev> 等价 diff <rev>-1:<rev>。可与 file 组合
+    args.push('-c', rev);
+    if (file) args.push('--', file);
+  } else if (file) {
+    args.push('--', file);
+  }
+  const r = await runSvn(p, args, file ? { sandboxRel: path.dirname(file) } : undefined);
+  if (!r.ok) {
+    if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
+    if (r.noSvn) return res.json({ ok: false, noSvn: true });
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn diff 失败' });
   }
   res.json({ ok: true, diff: r.stdout });
 });

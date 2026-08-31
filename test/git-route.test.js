@@ -227,6 +227,26 @@ test('stage: 非 git 仓库返回 notRepo', async () => {
   assert.strictEqual(r.body.notRepo, true);
 });
 
+test('discard: 撤销未提交修改恢复到 HEAD（不可逆丢弃）', async () => {
+  // 造一个未提交修改 → discard → 内容与状态都恢复
+  const target = path.join(repoDir, 'b.txt');
+  fs.writeFileSync(target, 'local edit\n');
+  const before = await get('/api/projects/repo/git/status');
+  assert.ok(before.body.files.some((f) => f.file === 'b.txt'), 'b.txt 在变更列表');
+  const r = await post('/api/projects/repo/git/discard', { file: 'b.txt' });
+  assert.strictEqual(r.body.ok, true);
+  // Windows 上 core.autocrlf 会在 checkout 时把 LF 转 CRLF，比对前归一化
+  const content = fs.readFileSync(target, 'utf-8').replace(/\r\n/g, '\n');
+  assert.strictEqual(content, 'world\n', '内容恢复到 HEAD');
+  const after = await get('/api/projects/repo/git/status');
+  assert.strictEqual(after.body.files.find((f) => f.file === 'b.txt'), undefined, '变更消失');
+});
+
+test('discard: 空文件 400', async () => {
+  const r = await post('/api/projects/repo/git/discard', { file: '' });
+  assert.strictEqual(r.status, 400);
+});
+
 test('fetch: 无远端时静默成功（git fetch 对无 origin 的仓库是 no-op，退出码 0）', async () => {
   const r = await post('/api/projects/repo/git/fetch');
   assert.strictEqual(r.body.ok, true);
