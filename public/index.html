@@ -2573,11 +2573,18 @@ function applyTermSettings() {
     body.style.fontFamily = fontFamily;
     body.style.fontSize = fontSize + 'px';
   }
-  // 文件查看器跟随同一套终端字体设置
+  // 文件编辑器跟随同一套终端字体设置。pre 是容器、code 才是文本元素——
+  // UA 样式表给 code 自带 font-family，字号上 code 还不吃继承（等宽元素默认 13px），
+  // 所以必须直接写 code，只写 pre 会让 gutter（继承 pre）与代码字体对不齐
   const fvPre = document.getElementById('fileViewPre');
   if (fvPre) {
     fvPre.style.fontFamily = fontFamily;
     fvPre.style.fontSize = fontSize + 'px';
+  }
+  const fvCode = document.getElementById('fileViewCode');
+  if (fvCode) {
+    fvCode.style.fontFamily = fontFamily;
+    fvCode.style.fontSize = fontSize + 'px';
   }
   termSessions.forEach((s) => {
     try { s.term.options.fontFamily = fontFamily; s.term.options.fontSize = fontSize; } catch (e) {}
