@@ -2742,6 +2742,14 @@ function applyTermSettings() {
     fvCode.style.fontFamily = fontFamily;
     fvCode.style.fontSize = fontSize + 'px';
   }
+  // Git diff 左右对比弹窗也跟随同一套字体设置（模态框常驻 DOM，直接写即可）
+  ['gitDiffLeft', 'gitDiffRight'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.fontFamily = fontFamily;
+      el.style.fontSize = fontSize + 'px';
+    }
+  });
   termSessions.forEach((s) => {
     try { s.term.options.fontFamily = fontFamily; s.term.options.fontSize = fontSize; } catch (e) {}
   });
