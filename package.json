@@ -1,6 +1,6 @@
 {
   "name": "poly-task-panel",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Windows 多元任务面板：web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树。",
   "type": "commonjs",
   "main": "server.js",

@@ -101,17 +101,17 @@ function assert(cond, msg) {
   fire(resizer, 'pointermove', { clientX: 50, pointerId: 2 });
   assert(drawer.style.width === '180px', '左移超界 → clamp 到最小 180px');
   fire(resizer, 'pointermove', { clientX: 2000, pointerId: 2 });
-  assert(drawer.style.width === '480px', '右移超界 → clamp 到最大 480px');
+  assert(drawer.style.width === '1024px', '右移超界 → clamp 到最大 1024px');
   fire(resizer, 'pointerup', { clientX: 2000, pointerId: 2 });
   assert(!drawer.classList.contains('dragging'), '拖拽结束移除 dragging 类');
-  assert(window.localStorage.getItem('sideDrawerWidth') === '480', '拖拽宽度已持久化 480');
-  assert(drawer.style.width === '480px', '结束后宽度保持 480px');
+  assert(window.localStorage.getItem('sideDrawerWidth') === '1024', '拖拽宽度已持久化 1024');
+  assert(drawer.style.width === '1024px', '结束后宽度保持 1024px');
 
   // --- 收起再展开恢复记忆宽度 ---
   window.toggleSidePanel('project');
   assert(!drawer.classList.contains('open'), '再次收起');
   window.toggleSidePanel('project');
-  assert(drawer.style.width === '480px', '展开后恢复记忆的 480px');
+  assert(drawer.style.width === '1024px', '展开后恢复记忆的 1024px');
 
   // --- 文件面板打开绑定项目（带参）+ 恢复持久化项目（无参）---
   fakeProjects = [

@@ -83,9 +83,10 @@ function detectGitBash() {
 const TERMINAL_TYPES = {
   claude: {
     bin: process.env.CLAUDE_BIN || 'claude',
+    // 默认跳过权限确认（与 codex 的 -a never 思路一致）；设了 CLAUDE_ARGS 则整体覆盖
     args: process.env.CLAUDE_ARGS
       ? process.env.CLAUDE_ARGS.split(' ').filter(Boolean)
-      : [],
+      : ['--dangerously-skip-permissions'],
     binResolved: null,
     idPrefix: 'c_',        // 会话 id 前缀：与项目 id（p_ 前缀）命名空间区分
     msgOutput: 'claude-output',
@@ -1750,6 +1751,17 @@ function runSvn(project, args, opts) {
   });
 }
 
+// svn info 输出里按键取值（"Revision: 123" 等），缺失返回 null
+function svnInfoPick(stdout, kv) {
+  const mm = stdout.match(new RegExp('^' + kv + ': (.*)$', 'm'));
+  return mm ? mm[1].trim() : null;
+}
+// svn info/status 失败的统一响应体：noSvn（未装命令行）/ notRepo（非工作副本）/ 其余报错
+function svnCmdFailResponse(r, cmdName) {
+  if (r.noSvn) return { ok: false, noSvn: true };
+  return r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || ('svn ' + cmdName + ' 失败') };
+}
+
 function getSvnProject(req, res) {
   const p = getProject(req.params.id);
   if (!p) { res.status(404).json({ ok: false, msg: '项目不存在' }); return null; }
@@ -1784,12 +1796,142 @@ function parseSvnStatus(stdout) {
   return { files };
 }
 
+// .svnignore：SVN 工作副本的项目级忽略规则（.gitignore 的简化版）。SVN 原生没有
+// 等价机制（svn:ignore 是逐目录属性、要进版本库，不适合本地噪音过滤），这里用项目
+// 根目录的 .svnignore 文件表达，规则命中 .gitignore 直觉：
+//   - 每行一条；空行与 # 注释行忽略；\# 等转义还原为字面字符
+//   - 条目名匹配：'target' 或 'target/'（尾部 / 只匹配目录）命中任意层级的同名
+//     目录/文件；含中间 '/' 的规则锚定项目根：'a/b' 只命中根下 a/b（'**/a/b' 例外）
+//   - 通配符：* 任意字符（不含 /）、? 单字符、[abc] 字符类，仅作用于路径段内；
+//     ** 作为独立路径段匹配零个或多个段：'**/logs/' 等价 'logs/'（任意层级），
+//     'a/**/b' 命中 a/b、a/x/b、a/x/y/b，'target/**' 连 target 目录条目一起忽略
+//   - 前导 / 锚定项目根：'/dist' 只匹配根下 dist，不匹配子目录里的 dist
+//   - 大小写不敏感（本面板 Windows 专用，NTFS 文件名大小写不敏感，规则同理）
+// 生效范围：/svn/status 的 M/A/D/?/! 全部状态——被忽略的条目服务端直接剔除，前端
+// 抽屉不显示、无法勾选，自然进不了提交清单（本项目提交永远显式传文件清单，不存在
+// 不带参数的“全部提交”，被忽略的改动不会被带进远端提交）。? 目录展开遍历同步跳过
+// 被忽略路径（省掉 node_modules 级别的递归）。无 .svnignore 文件时行为完全不变。
+
+// 解析 .svnignore 内容 → 规则数组，统一按 '/' 分段：每条 { segs, dirOnly, anchored }。
+// 无效行（解析后为空、含不支持的 \ 用法）直接丢弃。文件不存在由调用方按无规则处理。
+function parseSvnIgnore(content) {
+  const rules = [];
+  for (const rawLine of String(content).split(/\r?\n/)) {
+    let line = rawLine;
+    // 行首 \# \! 转义：先记住是字面行再剥反斜杠——若先剥成 # 开头会被当注释丢弃，
+    // 转义失效。行内 \# \! \空格 等转义随后统一还原为字面字符
+    const literalStart = /^\\[#!]/.test(line);
+    if (literalStart) line = line.slice(1);
+    line = line.replace(/\\([#!\s])/g, '$1');
+    let trimmed = line.trim();
+    if ((!trimmed || trimmed.startsWith('#')) && !literalStart) continue;
+    let anchored = false;
+    if (trimmed.startsWith('/')) { anchored = true; trimmed = trimmed.slice(1); }
+    let dirOnly = false;
+    if (trimmed.endsWith('/')) { dirOnly = true; trimmed = trimmed.slice(0, -1); }
+    const segs = trimmed.split('/').filter(Boolean);
+    if (!segs.length) continue;
+    // gitignore 规范：模式中间含 '/' 时锚定项目根（'a/b' 只命中根下 a/b）；
+    // 以 '**/' 开头的除外（'**/logs' 表达任意层级）
+    if (!anchored && segs.length > 1 && segs[0] !== '**') anchored = true;
+    rules.push({ segs, dirOnly, anchored });
+  }
+  return rules;
+}
+
+// 通配符段 → 正则（含缓存，按段缓存全局共享）。* ? [seq] 语法与 .gitignore 一致，
+// 均不跨 '/'。i 标志：大小写不敏感（Windows/NTFS 文件名大小写不敏感，规则同理）
+const SVN_IGNORE_SEG_RE_CACHE = new Map();
+function svnIgnoreSegToRegExp(seg) {
+  let re = SVN_IGNORE_SEG_RE_CACHE.get(seg);
+  if (re) return re;
+  let src = '';
+  for (let i = 0; i < seg.length; i++) {
+    const ch = seg[i];
+    if (ch === '*') src += '[^/]*';
+    else if (ch === '?') src += '[^/]';
+    else if (ch === '[') {
+      const close = seg.indexOf(']', i + 1);
+      if (close === -1 || close === i + 1) { src += '\\['; continue; } // 未闭合 / 空，按字面
+      let cls = seg.slice(i + 1, close);
+      const negated = cls.startsWith('!') || cls.startsWith('^');
+      if (negated) cls = cls.slice(1);
+      if (!cls) { src += '\\['; continue; }
+      // 非法字符类（如 [z-a] 乱序范围）：new RegExp 会直接 THROW 拖垮整个
+      // status 请求，预校验不过就整体按字面量处理（与 gitignore 对坏模式的
+      // 宽容处理一致——不生效但不伤害）
+      try { new RegExp('[' + (negated ? '^' : '') + cls.replace(/[\\\]]/g, '\\$1') + ']'); }
+      catch (e) { src += seg.slice(i, close + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); i = close; continue; }
+      src += '[' + (negated ? '^' : '') + cls.replace(/[\\\]]/g, '\\$1') + ']';
+      i = close;
+    } else src += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  re = new RegExp('^' + src + '$', 'i');
+  SVN_IGNORE_SEG_RE_CACHE.set(seg, re);
+  return re;
+}
+
+// 单段匹配：字面段全等（大小写不敏感），含通配符的段走正则
+function svnIgnoreSegMatch(seg, name) {
+  if (!/[*?[]/.test(seg)) return seg.toLowerCase() === name.toLowerCase();
+  return svnIgnoreSegToRegExp(seg).test(name);
+}
+
+// 目录路径（相对项目根、'/' 分隔）是否被规则数组忽略。nameMode 'file' 按普通条目
+// 匹配，'dir' 按目录匹配（dirOnly 规则只对目录生效）。匹配语义与 .gitignore 对齐：
+//   - 非锚定规则可命中任意层级的同名段：'target' 命中 x/y/target
+//   - 锚定（前导 /）与 'a/b' 形式的中间路径规则只从项目根起匹配
+//   - '**' 段吸收零个或多个路径段（见 parseSvnIgnore 注释）
+//   - 目录被忽略 → 其下所有内容视为被忽略（调用方对祖先目录先判定）
+function svnIgnoreMatch(rules, relPath, nameMode) {
+  if (!rules || !rules.length) return false;
+  const segs = relPath.split('/').filter(Boolean);
+  if (!segs.length) return false;
+  const isDir = nameMode === 'dir';
+  for (const rule of rules) {
+    if (rule.dirOnly && !isDir) continue;
+    // dirOnly 规则必须命中路径末段（endAlign）；其余规则允许命中中间窗口——
+    // 与"目录被忽略则其下全部忽略"语义一致（祖先目录检查之外的双保险）
+    const endAlign = rule.dirOnly;
+    const maxStart = rule.anchored ? 0 : segs.length - 1;
+    for (let start = 0; start <= maxStart; start++) {
+      if (svnIgnoreSegsMatch(rule.segs, segs, 0, start, endAlign)) return true;
+    }
+  }
+  return false;
+}
+
+// 规则段从 (ri, si) 起逐段匹配；规则段全部消耗即命中（endAlign 时还要求恰好
+// 停在路径末段）。'**' 段回溯吸收零个或多个路径段，其余段逐一对上即前进。
+function svnIgnoreSegsMatch(ruleSegs, segs, ri, si, endAlign) {
+  if (ri === ruleSegs.length) return endAlign ? si === segs.length : true;
+  const rs = ruleSegs[ri];
+  if (rs === '**') {
+    for (let k = si; k <= segs.length; k++) {
+      if (svnIgnoreSegsMatch(ruleSegs, segs, ri + 1, k, endAlign)) return true;
+    }
+    return false;
+  }
+  if (si >= segs.length || !svnIgnoreSegMatch(rs, segs[si])) return false;
+  return svnIgnoreSegsMatch(ruleSegs, segs, ri + 1, si + 1, endAlign);
+}
+
+// 读取项目根的 .svnignore；文件不存在 / 读失败返回 null（无忽略规则）
+function loadSvnIgnore(p) {
+  try {
+    return parseSvnIgnore(fs.readFileSync(path.join(p.projectPath, '.svnignore'), 'utf-8'));
+  } catch (e) {
+    return null;
+  }
+}
+
 // 展开未版本控制（?）目录：svn status 对整个 ? 目录只报一条（与 git
 // --untracked-files=all 不同），前端「未提交列表以文件为单位」需要目录内的
 // 具体文件。用文件系统遍历展开（svn 对未版本控制节点不提供 list 能力），
-// 逐文件返回 {st:'?', file}。忽略 node_modules / .git / .svn 等噪音目录。
+// 逐文件返回 {st:'?', file}。忽略 node_modules / .git / .svn 等噪音目录；
+// .svnignore 规则命中（含祖先目录被忽略）的路径直接跳过、不再递归遍历。
 const SVN_EXPAND_SKIP_DIRS = new Set(['node_modules', '.git', '.svn']);
-function expandSvnUnversionedDir(p, dirRel, out, depth) {
+function expandSvnUnversionedDir(p, dirRel, out, depth, ignoreRules) {
   if (depth > 8) return; // 防御：异常深的嵌套不再展开
   const abs = path.join(p.projectPath, dirRel);
   let entries;
@@ -1801,8 +1943,9 @@ function expandSvnUnversionedDir(p, dirRel, out, depth) {
   for (const ent of entries) {
     if (SVN_EXPAND_SKIP_DIRS.has(ent.name)) continue;
     const rel = dirRel ? dirRel + '/' + ent.name : ent.name;
+    if (svnIgnoreMatch(ignoreRules, rel, ent.isDirectory() ? 'dir' : 'file')) continue;
     if (ent.isDirectory()) {
-      expandSvnUnversionedDir(p, rel, out, depth + 1);
+      expandSvnUnversionedDir(p, rel, out, depth + 1, ignoreRules);
     } else if (ent.isFile()) {
       out.push({ st: '?', file: rel });
     }
@@ -1812,20 +1955,91 @@ function expandSvnUnversionedDir(p, dirRel, out, depth) {
 // svn status 路由：附带 rev/url（svn info 的关键输出），前端头部一次渲染。
 // 注意先跑 info 探测工作副本：svn status 在非工作副本目录 exit 0（只输出 W155007
 // 警告到 stderr），不能作为工作副本判定依据；svn info 才会以 E155007 非零退出。
-app.get('/api/projects/:id/svn/status', async (req, res) => {
-  const p = getSvnProject(req, res);
-  if (!p) return;
+// svn status 结果内存缓存：SVN 大工作副本（几万文件）status 要 10s+，
+// 打开抽屉/连续重绘/刷新按钮不该每次都硬跑。按项目缓存最近一次结果：
+//   - TTL（5s）内：直接复用
+//   - TTL 外（stale）：立即返回旧数据（秒出），后台静默重扫，扫完自动回填缓存。
+//     下次请求拿到新数据。前端凭响应里的 stale 标志转圈轮询，扫完静默更新
+//   - 写操作（add/commit/revert/update）后主动失效：下次请求同步重扫（不走 stale）
+//   - 并发去重（单飞）：同一项目同一时刻只有一个真扫描在跑（实测并发扫描因
+//     wc.db SQLite 锁竞争 13s→43s，越跑越慢），其余请求共享同一 promise
+const SVN_STATUS_CACHE_TTL = 5 * 1000;
+const svnStatusCache = new Map(); // projectId -> { at, promise }（promise resolve 完整响应体）
+const svnStatusStaleJobs = new Set(); // 正在后台重扫的 projectId（防重复投 jobs）
+const svnStatusBgManual = new Set(); // 重扫中且由手动刷新（refresh=1）触发的 projectId——前端凭此区分「用户在等的扫描」与例行重扫（TTL 过期），前者才转圈
+const svnStatusStaleDone = new Set(); // 后台重扫完成的 projectId（供前端轮询/拉取时清）
+const svnStatusBgPromise = new Map(); // projectId -> 后台重扫 promise（单飞共享用）
+// 缓存命中返回进行中/已完成的响应 promise（await 即数据），未命中返回 null
+function svnStatusCacheGet(id) {
+  const e = svnStatusCache.get(id);
+  if (!e) return null;
+  return e.promise;
+}
+function svnStatusCacheIsFresh(id) {
+  const e = svnStatusCache.get(id);
+  return !!e && Date.now() - e.at <= SVN_STATUS_CACHE_TTL;
+}
+function svnStatusCacheInvalidate(id) {
+  svnStatusCache.delete(id);
+}
+
+// stale 数据后台重扫：扫完回填缓存。由 status 路由在返回 stale 数据时投递；
+// refresh=1 同样走这里（前端立即拿旧数据 + 转圈轮询，不再同步等扫描）。
+// 失败静默（旧缓存保留，下次再试）。重扫期间旧缓存保留不删：新请求命中
+// 非 fresh 缓存 → 再走 stale 分支秒回旧数据（前端能持续拿到 busy 指示），
+// 投递去重由 svnStatusStaleJobs 挡住，不会重复起扫描。
+// manual：是否手动刷新（refresh=1）触发。例行重扫（TTL 过期）进行中来了手动
+// 刷新 → 升级为 manual：用户点了刷新在等结果，转圈指示该亮。
+function svnStatusBackgroundRefresh(p, manual) {
+  // 已在跑且本次是手动刷新 → 升级为 manual（用户在等）；例行投递不改动既有标记
+  if (svnStatusStaleJobs.has(p.id)) {
+    if (manual) svnStatusBgManual.add(p.id);
+    return;
+  }
+  svnStatusStaleJobs.add(p.id);
+  if (manual) svnStatusBgManual.add(p.id);
+  const startedAt = Date.now();
+  const promise = buildSvnStatusResponse(p).then((data) => {
+    // 回填前校验：扫描期间若发生了写操作（缓存被重新回填且时间更新），
+    // 丢弃本次过期结果，否则会把写操作后的新状态覆盖成扫描前的旧状态
+    const cur = svnStatusCache.get(p.id);
+    if (data.ok && (!cur || cur.at <= startedAt)) {
+      svnStatusCache.set(p.id, { at: Math.max(startedAt, Date.now()), promise });
+    }
+    return data;
+  }).catch((e) => ({ ok: false, msg: 'svn status 异常: ' + (e && e.message || e) })).finally(() => {
+    svnStatusStaleJobs.delete(p.id);
+    svnStatusBgManual.delete(p.id);
+    svnStatusBgPromise.delete(p.id);
+    svnStatusStaleDone.add(p.id); // 通知前端：后台刷新完成，可重拉
+  });
+  svnStatusBgPromise.set(p.id, promise);
+}
+
+// 组装 svn status 完整响应（info + status + .svnignore 过滤 + ? 目录展开）。
+// 只被带缓存的 status 路由调用；失败响应不进缓存（下次重试）。
+async function buildSvnStatusResponse(p) {
+  // 测试钩子：人为拖慢扫描，制造确定的「重扫进行中」窗口（仅测试设置）
+  const delay = parseInt(process.env.__PTP_SVN_SCAN_DELAY_MS__, 10);
+  if (delay > 0) await new Promise((res) => setTimeout(res, delay));
   const info = await runSvn(p, ['info']);
-  if (!info.ok) {
-    if (info.noSvn) return res.json({ ok: false, noSvn: true });
-    return res.json(info.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: info.msg || 'svn info 失败' });
-  }
+  if (!info.ok) return svnCmdFailResponse(info, 'info');
   const r = await runSvn(p, ['status']);
-  if (!r.ok) {
-    if (r.noSvn) return res.json({ ok: false, noSvn: true });
-    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn status 失败' });
-  }
+  if (!r.ok) return svnCmdFailResponse(r, 'status');
   const parsed = parseSvnStatus(r.stdout);
+  // .svnignore：项目根有该文件时按规则过滤（M/A/D/?/! 全部状态生效），被忽略的
+  // 条目服务端直接剔除，前端抽屉不显示、也进不了提交清单。祖先目录被忽略的条目
+  // （如 target/ 整目录被忽略时的 target/cla/ss）一并剔除——目录被忽略即其下
+  // 全部内容被忽略。
+  const ignoreRules = loadSvnIgnore(p);
+  const isIgnoredEntry = (rel, isDir) => {
+    if (!ignoreRules || !ignoreRules.length) return false;
+    const segs = rel.split('/').filter(Boolean);
+    for (let i = 1; i < segs.length; i++) {
+      if (svnIgnoreMatch(ignoreRules, segs.slice(0, i).join('/'), 'dir')) return true;
+    }
+    return svnIgnoreMatch(ignoreRules, rel, isDir ? 'dir' : 'file');
+  };
   // ? 目录条目展开为目录内具体文件；目录本身不再出现在列表里（前端以文件为单位），
   // 仅当目录为空（没有任何文件可展开）时保留原条目——否则空目录会从列表消失、无法勾选。
   // 注意 Windows 上 svn status 的 ? 目录条目不带尾部斜杠（"? newpkg"），用
@@ -1838,9 +2052,10 @@ app.get('/api/projects/:id/svn/status', async (req, res) => {
         isDir = fs.statSync(path.join(p.projectPath, f.file)).isDirectory();
       } catch (e) { /* stat 失败按文件处理 */ }
     }
+    if (isIgnoredEntry(f.file, isDir)) continue;
     if (isDir) {
       const expanded = [];
-      expandSvnUnversionedDir(p, f.file, expanded, 0);
+      expandSvnUnversionedDir(p, f.file, expanded, 0, ignoreRules);
       if (expanded.length) {
         files.push(...expanded);
       } else {
@@ -1850,18 +2065,79 @@ app.get('/api/projects/:id/svn/status', async (req, res) => {
       files.push(f);
     }
   }
-  const pick = (kv) => {
-    const mm = info.stdout.match(new RegExp('^' + kv + ': (.*)$', 'm'));
-    return mm ? mm[1].trim() : null;
-  };
-  res.json({
+  return {
     ok: true,
-    rev: pick('Revision'),
-    url: pick('URL'),
-    lastChangedAuthor: pick('Last Changed Author'),
-    lastChangedDate: pick('Last Changed Date'),
+    rev: svnInfoPick(info.stdout, 'Revision'),
+    url: svnInfoPick(info.stdout, 'URL'),
+    lastChangedAuthor: svnInfoPick(info.stdout, 'Last Changed Author'),
+    lastChangedDate: svnInfoPick(info.stdout, 'Last Changed Date'),
+    fetchedAt: Date.now(), // 前端展示数据新鲜度（缓存命中时是旧值，可显示“缓存于 xx 秒前”）
     files,
+  };
+}
+
+// svn status（带缓存，stale-while-revalidate）：
+//   - TTL 内：直接回缓存（秒出）
+//   - TTL 外有旧数据（含 ?refresh=1 手动刷新）：立即回旧数据（带 stale:true），
+//     同时投后台重扫；重扫完成回填缓存。手动刷新也绝不同步等 10s+ ——
+//     旧列表先照常展示，扫完静默更新
+//   - 无缓存 / 写操作后失效：同步重扫（首屏或数据变更后必须拿新值）
+//   - 全局单飞：同一项目同一时刻只有一个真扫描在跑（后台或同步），
+//     期间所有请求（含 refresh）共享进行中的结果——并发 svn status 实测
+//     互相拖慢（13s→43s，wc.db SQLite 锁竞争）
+app.get('/api/projects/:id/svn/status', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const force = req.query.refresh === '1';
+  const sync = req.query.sync === '1'; // 强制同步扫（绕过缓存与 stale，测试/工具用）
+  if (sync) svnStatusCacheInvalidate(p.id);
+  if (!sync) {
+    const cached = svnStatusCacheGet(p.id);
+    if (cached) {
+      const data = await cached;
+      // 手动刷新（refresh=1）：无论新旧一律走 stale——立即回旧数据 + 后台重扫，
+      // 绝不同步等扫描（旧语义 invalidate+同步扫 = 点刷新白屏 10s+，已废除）。
+      // 重扫带 manual 来源标记：手动刷新触发的才让前端转圈，例行重扫静默
+      if (!force && svnStatusCacheIsFresh(p.id)) return res.json(data);
+      svnStatusBackgroundRefresh(p, force);
+      return res.json({ ...data, stale: true });
+    }
+    // 无缓存：若后台任务恰好在跑，直接共享它的结果（单飞）
+    if (svnStatusStaleJobs.has(p.id)) {
+      const bg = svnStatusBgPromise.get(p.id);
+      if (bg) return res.json(await bg);
+    }
+  }
+  const promise = buildSvnStatusResponse(p).then((data) => {
+    if (data.ok) svnStatusCache.set(p.id, { at: Date.now(), promise });
+    else svnStatusCache.delete(p.id); // 失败不缓存，下次重试
+    return data;
   });
+  svnStatusCache.set(p.id, { at: Date.now(), promise });
+  res.json(await promise);
+});
+
+// 轻量轮询：后台重扫是否完成。前端 stale 展示期间定时问一下，完成了就重拉拿新数据。
+// 比让前端盲等重拉（每次都打真扫描）轻得多——这里只查内存 Set，零开销。
+// busy：该项目是否正在真扫描（后台重扫或无缓存同步扫）
+// manual：在跑的扫描是否由手动刷新触发——前端切回项目时凭它区分「用户在等的
+// 扫描」（恢复转圈/禁用态）与例行重扫（TTL 过期，静默等数据回填即可）
+app.get('/api/projects/:id/svn/status-refresh-done', (req, res) => {
+  const id = req.params.id;
+  const done = svnStatusStaleDone.has(id) && !svnStatusStaleJobs.has(id);
+  if (done) svnStatusStaleDone.delete(id);
+  const busy = svnStatusStaleJobs.has(id);
+  res.json({ ok: true, done, busy, manual: busy && svnStatusBgManual.has(id) });
+});
+
+// svn 头部信息（rev/url）：只跑 svn info（零点几秒），供抽屉骨架屏秒出——
+// 完整 status 在大工作副本上要 10s+，头部不该陪绑。不进缓存（本身够快）。
+app.get('/api/projects/:id/svn/status-meta', async (req, res) => {
+  const p = getSvnProject(req, res);
+  if (!p) return;
+  const info = await runSvn(p, ['info']);
+  if (!info.ok) return res.json(svnCmdFailResponse(info, 'info'));
+  res.json({ ok: true, rev: svnInfoPick(info.stdout, 'Revision'), url: svnInfoPick(info.stdout, 'URL') });
 });
 
 // 联网比对远端仓库，返回本地未更新的提交条数（behind），仅用于「更新」按钮
@@ -1871,17 +2147,10 @@ app.get('/api/projects/:id/svn/remote-status', async (req, res) => {
   const p = getSvnProject(req, res);
   if (!p) return;
   const info = await runSvn(p, ['info']);
-  if (!info.ok) {
-    if (info.noSvn) return res.json({ ok: false, noSvn: true });
-    return res.json(info.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: info.msg || 'svn info 失败' });
-  }
+  if (!info.ok) return res.json(svnCmdFailResponse(info, 'info'));
   // svn log -r BASE:HEAD 列出本地基准版本之后的提交（区间含端点，BASE 自身也会
   // 返回，因此下面按 revision > 本地 rev 过滤掉端点条目）。
-  const pick = (kv) => {
-    const mm = info.stdout.match(new RegExp('^' + kv + ': (.*)$', 'm'));
-    return mm ? mm[1].trim() : null;
-  };
-  const baseRev = parseInt(pick('Revision'), 10) || 0;
+  const baseRev = parseInt(svnInfoPick(info.stdout, 'Revision'), 10) || 0;
   const r = await runSvn(p, ['log', '--xml', '-r', 'BASE:HEAD']);
   if (!r.ok) {
     if (r.noSvn) return res.json({ ok: false, noSvn: true });
@@ -1902,6 +2171,7 @@ app.post('/api/projects/:id/svn/update', async (req, res) => {
   const p = getSvnProject(req, res);
   if (!p) return;
   const r = await runSvn(p, ['update']);
+  svnStatusCacheInvalidate(p.id); // update 改变工作副本状态，status 缓存失效
   if (!r.ok) {
     if (r.noSvn) return res.json({ ok: false, noSvn: true });
     return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'svn update 失败' });
@@ -1917,6 +2187,7 @@ app.post('/api/projects/:id/svn/add', async (req, res) => {
   if (!p) return;
   const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
   if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  svnStatusCacheInvalidate(p.id); // add 改变版本控制状态，status 缓存失效
   // 沙箱校验每个文件（与 diff 单文件同规则），逃逸直接拒绝
   for (const f of files) {
     const target = path.resolve(path.join(p.projectPath, f));
@@ -1961,6 +2232,7 @@ app.post('/api/projects/:id/svn/commit', async (req, res) => {
   if (!p) return;
   const message = String((req.body && req.body.message) || '').trim();
   if (!message) return res.status(400).json({ ok: false, msg: '提交说明不能为空' });
+  svnStatusCacheInvalidate(p.id); // commit 改变工作副本状态，status 缓存失效
   const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
   // 新增（A）目录里的文件若要提交，其 A 状态祖先目录必须一起进本次提交
   // （E200009: child is part of the commit but parent not known to exist）。
@@ -2002,6 +2274,7 @@ app.post('/api/projects/:id/svn/revert', async (req, res) => {
   if (!p) return;
   const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
   if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  svnStatusCacheInvalidate(p.id); // revert 改变工作副本状态，status 缓存失效
   const r = await runSvn(p, ['revert', '--depth', 'infinity', '--'].concat(files));
   if (!r.ok) {
     if (r.sandbox) return res.status(400).json({ ok: false, msg: r.msg });
