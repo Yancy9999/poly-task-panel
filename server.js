@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn, exec, execSync, execFile } = require('child_process');
+const { spawn, exec, execSync, execFile, spawnSync } = require('child_process');
 const express = require('express');
 const WebSocket = require('ws');
 
@@ -57,6 +57,28 @@ const PUBLIC_DIR = process.env.PUBLIC_DIR
 // （测试时注入假的 CLI 可执行，避免依赖外部 CLI 行为与网络）。
 // CLAUDE_ARGS 类似：空格分隔的额外参数（测试用 `node fake-claude.js` 时传脚本路径）。
 // 各类型的 args 为"默认值，env 覆盖优先"：codex 未设 CODEX_ARGS 时默认 `-a never`。
+// Git Bash 可执行探测：`where git` 找到 git.exe（如 C:\Program Files\Git\cmd\git.exe），
+// 同一安装根下的 bin\bash.exe 即 Git Bash。找不到时回退常见安装路径，仍失败返回
+// 裸名 'bash'（让 spawn 报原错，便于排错）。非 Windows 直接返回 'bash'。
+function detectGitBash() {
+  if (process.platform !== 'win32') return 'bash';
+  const candidates = [];
+  try {
+    const gitPath = execSync('where git', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim().split(/\r?\n/)[0];
+    if (gitPath) {
+      // <Git 根>/cmd/git.exe -> <Git 根>/bin/bash.exe
+      candidates.push(path.join(path.dirname(path.dirname(gitPath)), 'bin', 'bash.exe'));
+    }
+  } catch (e) {}
+  candidates.push(
+    path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'bin', 'bash.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
+  );
+  return candidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || 'bash';
+}
+
 // binResolved 在定义后统一填（见 resolveTerminalBin 下方）。
 const TERMINAL_TYPES = {
   claude: {
@@ -91,6 +113,19 @@ const TERMINAL_TYPES = {
     msgOutput: 'cmd-output',
     msgInput: 'cmd-input',
     msgSession: 'cmd-session',
+  },
+  // gitbash：在项目目录里开一个交互式 Git Bash（Git for Windows 自带的 bash.exe），
+  // 走真 PTY + xterm，与 cmd 会话同一套会话管理。bin 默认按安装目录探测，
+  // 可用 GIT_BASH_BIN 环境变量覆盖（测试可注入假可执行）。登录 shell（-l）
+  // 使 PATH 等环境与双击 Git Bash 图标一致。
+  gitbash: {
+    bin: process.env.GIT_BASH_BIN || detectGitBash(),
+    args: ['-l'],           // 登录 shell：加载 /etc/profile，PATH 含 Git 工具链
+    binResolved: null,
+    idPrefix: 'g_',        // g_ = git bash，与 c_(claude)/x_(codex)/m_(cmd)/i_(pi) 命名空间区分
+    msgOutput: 'gitbash-output',
+    msgInput: 'gitbash-input',
+    msgSession: 'gitbash-session',
   },
   // pi：与 claude/codex 同级的交互式 agent CLI，走真 PTY + xterm。
   // 默认 `pi`；可用 PI_BIN/PI_ARGS 覆盖（测试可注入假可执行）。无默认参数。
@@ -497,7 +532,7 @@ process.on('SIGTERM', () => { stopAllOnExit(); process.exit(0); });
 // 避免前端混用。
 // ---------------------------------------------------------------------------
 const ptySessions = new Map();
-const sessionSeqs = { claude: 0, codex: 0, cmd: 0, pi: 0 };
+const sessionSeqs = { claude: 0, codex: 0, cmd: 0, gitbash: 0, pi: 0 };
 
 function newSessionId(type) {
   sessionSeqs[type] += 1;
@@ -1201,6 +1236,67 @@ app.post('/api/projects/:id/files/new', (req, res) => {
   res.json({ ok: true, sub, isDir });
 });
 
+// 删除文件/文件夹（进回收站）：body { sub, isDir }。sub 为相对 projectPath 的路径（'' = 项目根，拒绝删除）。
+// 沙箱化同 /files；isDir 仅用于确认框语义提示，删除方式由 target 实际类型决定。
+// 回收站实现：Windows 用 PowerShell Shell.Application 的 NameSpace(10)（回收站不可脚本直写，
+// 但其 MoveHere 对源路径做删除语义移动时经系统 shell，实际效果即移入回收站）；
+// VSCode/资源管理器均如此。PowerShell 调用失败（PS 不在/策略拦截）时降级为物理删除并返回
+// recycled:false，前端提示告知未进回收站，保证功能可用。
+app.post('/api/projects/:id/files/delete', (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const sub = typeof body.sub === 'string' ? body.sub : '';
+  if (!sub) return res.status(400).json({ ok: false, msg: '不能删除项目根目录' });
+  const target = path.resolve(path.join(base, sub));
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  // 项目根本身（rel === ''）同样拒绝：sub 非空但 resolve 后落在 base 上（如 sub='.'）
+  if (!rel) return res.status(400).json({ ok: false, msg: '不能删除项目根目录' });
+  if (!fs.existsSync(target)) {
+    return res.status(404).json({ ok: false, msg: '文件不存在: ' + sub });
+  }
+  const isDir = fs.statSync(target).isDirectory();
+  let recycled = false;
+  try {
+    recycled = moveToRecycleBin(target);
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '删除失败: ' + (err.message || '') });
+  }
+  if (!recycled) {
+    // 降级：物理删除（目录递归）。尽力而为，失败再报错
+    try {
+      if (isDir) fs.rmSync(target, { recursive: true, force: true });
+      else fs.rmSync(target, { force: true });
+    } catch (err) {
+      return res.status(500).json({ ok: false, msg: '删除失败: ' + (err.message || '') });
+    }
+  }
+  res.json({ ok: true, isDir, recycled });
+});
+
+// 移入回收站：PowerShell + Shell.Application。返回 true=已进回收站；
+// PowerShell 不可用/失败抛错或返回 false（由调用方降级物理删除）。
+function moveToRecycleBin(target) {
+  // execFile 同步等待；PowerShell 单行脚本，路径用单引号包裹（路径内单引号翻倍转义）
+  const ps = `'
+    $sh = New-Object -ComObject Shell.Application;
+    $recycle = $sh.NameSpace(10);
+    $item = $recycle.MoveHere('${target.replace(/'/g, "''")}');
+  '`;
+  try {
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 15000 });
+    if (r.error || r.status !== 0) return false;
+    return fs.existsSync(target) ? false : true;
+  } catch (_) {
+    return false;
+  }
+}
+
 // 日志历史：start.log 是全量历史（appendLog 同时写文件和内存缓冲），
 // 直接返回文件内容即可。之前用 memBuffer.slice(fileHistory.length) 拼接，
 // 但 fileHistory 按 64KB 块切、memBuffer 按行切，两者计量单位不一致，
@@ -1437,6 +1533,20 @@ app.get('/api/projects/:id/git/branches', async (req, res) => {
     ? rr.stdout.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.endsWith('/HEAD'))
     : [];
   res.json({ ok: true, branches, current, remote });
+});
+
+// 版本控制类型探测（轻量）：git rev-parse 成功 → git；失败再探 svn info → svn；
+// 都失败 → none（无版本控制）。供项目卡片名称前的 VCS logo 使用，结果不缓存——
+// 目录可能被 init/删除 .git，卡片重渲染时每次探测；git rev-parse 本地执行开销极小。
+app.get('/api/projects/:id/vcs-kind', async (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const g = await runGit(p, ['rev-parse', '--is-inside-work-tree']);
+  if (g.ok) return res.json({ ok: true, kind: 'git' });
+  const s = await runSvn(p, ['info']);
+  if (s.ok) return res.json({ ok: true, kind: 'svn' });
+  // svn 未安装时无法区分“是 SVN 工作副本”与“无版本控制”，按无版本控制处理
+  res.json({ ok: true, kind: 'none' });
 });
 
 // 初始化 git 仓库：git init（幂等，已 init 过的目录只是 reinitialize 无副作用）。
@@ -1990,8 +2100,8 @@ app.get('/api/projects/:id/svn/diff', async (req, res) => {
 // 两类型路由平行:/api/projects/:id/claude-sessions 与 .../codex-sessions,
 // 同一套 handler 按类型参数化注册;sessionId 前缀已含类型,其余逻辑共用。
 // ---------------------------------------------------------------------------
-const SESSION_ROUTE_SUFFIX = { claude: 'claude-sessions', codex: 'codex-sessions', cmd: 'cmd-sessions', pi: 'pi-sessions' };
-for (const type of ['claude', 'codex', 'cmd', 'pi']) {
+const SESSION_ROUTE_SUFFIX = { claude: 'claude-sessions', codex: 'codex-sessions', cmd: 'cmd-sessions', gitbash: 'gitbash-sessions', pi: 'pi-sessions' };
+for (const type of ['claude', 'codex', 'cmd', 'gitbash', 'pi']) {
   const base = `/api/projects/:id/${SESSION_ROUTE_SUFFIX[type]}`;
 
   // 列出某项目下的活跃终端会话
