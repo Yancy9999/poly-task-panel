@@ -1,10 +1,16 @@
 # PolyTaskPanel
 
-**版本**：2.2.1
+**版本**：2.3.0
 
 多元任务面板：Web 界面管理 SpringBoot / Node 项目，一键启停、实时日志、进程树清理，并内置 Claude Code / Codex / pi 交互式终端。
 
 ---
+
+## 2.3.0 更新
+
+- **终端栏「常用文本」按钮**：分栏窗口底部状态栏在「/」常用命令按钮后新增「T」常用文本图标按钮，点击弹出文本列表，点选即把该文本直接输入到当前栏终端（**不回车**，可继续编辑后自行提交）。
+  - 对所有类型会话显示（claude / codex / pi / cmd / Git Bash），与「/」按钮（仅 claude/codex/pi）不同；空白栏不显示。
+  - 设置面板新增「常用文本」页：每行一条纯文本（无需「命令|说明」格式），按会话类型分两份——Agent（claude / codex / pi）与命令行（cmd / Git Bash），存 settings.json 的 `agentQuickTexts` / `cmdQuickTexts`，空列表时弹层提示未配置。
 
 ## 2.2.1 更新
 

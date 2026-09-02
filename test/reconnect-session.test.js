@@ -31,9 +31,10 @@ window.fetch = async (url) => {
   return { json: async () => [] };
 };
 window.WebSocket = class { constructor() {} send() {} close() {} };
-// 富 Terminal stub：createTerm 会调 loadAddon/open/onData/attachCustomKeyEventHandler；
-// renderPanes 的 fit/focus 都在 try/catch 内，缺方法也不抛。
+// 富 Terminal stub：createTerm 会调 loadAddon/open/onData/attachCustomKeyEventHandler，
+// 并给 term.textarea（open 后存在）挂 paste 监听；renderPanes 的 fit/focus 都在 try/catch 内，缺方法也不抛。
 window.Terminal = class {
+  constructor() { this.textarea = { addEventListener() {} }; }
   loadAddon() {} open() {} onData() {} onTitleChange() {} attachCustomKeyEventHandler() {} dispose() {} focus() {}
 };
 window.FitAddon = { FitAddon: class { fit() {} loadAddon() {} } };

@@ -326,12 +326,12 @@
   /* 空白占位（会话被移走 / 初始空栏） */
   .pane-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6b6d70; font-style: italic; font-size: 13px; }
   .pane-empty.hidden { display: none; }
-  /* 终端栏底部状态栏：每栏一条（含空白栏），终端/空白占位上移让位；左侧放「/」命令按钮 */
+  /* 终端栏底部状态栏：每栏一条（含空白栏），终端/空白占位上移让位；左侧放「/」命令按钮与「T」常用文本按钮 */
   .pane-body.with-status .pane-term, .pane-body.with-status .pane-empty { bottom: 25px; }
   .pane-status { position: absolute; left: 0; right: 0; bottom: 0; height: 25px; display: flex; align-items: center; gap: 4px; padding: 0 4px; box-sizing: border-box; background: #232528; border-top: 1px solid #2a2e33; user-select: none; z-index: 10; }
-  .pane-status .slash-btn { height: 20px; min-width: 22px; padding: 0 6px; display: none; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; font-size: 13px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1; }
-  .pane-status .slash-btn.show { display: inline-flex; }
-  .pane-status .slash-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .pane-status .slash-btn, .pane-status .text-btn { height: 20px; min-width: 22px; padding: 0 6px; display: none; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; font-size: 13px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1; }
+  .pane-status .slash-btn.show, .pane-status .text-btn.show { display: inline-flex; }
+  .pane-status .slash-btn:hover, .pane-status .text-btn:hover { background: #3a3c3f; color: #e3e3e3; }
   /* 「/」按钮弹出的常用命令列表：状态栏上方，深色与终端区一致 */
   .cmd-pop { position: absolute; left: 6px; bottom: 29px; width: 300px; max-height: 280px; overflow-y: auto; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 60; }
   .cmd-pop .cmd-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
@@ -339,6 +339,9 @@
   .cmd-pop .cmd-item .cmd-name { flex-shrink: 0; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; color: #79a8ff; white-space: nowrap; }
   .cmd-pop .cmd-item .cmd-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #86909c; }
   .cmd-pop .cmd-empty { padding: 10px 12px; font-size: 12px; color: #6b6d70; font-style: italic; }
+  /* 「T」按钮弹出的常用文本列表：复用 .cmd-pop 深色弹层；条目只有文本，无说明列 */
+  .cmd-pop .text-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmd-pop .text-item:hover { background: #3a3c3f; }
   /* 拖拽排序：按住标题栏左右拖动，在目标栏间高亮插入位 */
   .pane-header { cursor: grab; }
   .pane-header:active { cursor: grabbing; }
@@ -960,6 +963,7 @@
       <div class="settings-nav">
         <button type="button" class="settings-nav-item active" data-settings-tab="font" onclick="switchSettingsTab('font')">字体</button>
         <button type="button" class="settings-nav-item" data-settings-tab="commands" onclick="switchSettingsTab('commands')">命令</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="texts" onclick="switchSettingsTab('texts')">常用文本</button>
         <button type="button" class="settings-nav-item" data-settings-tab="files" onclick="switchSettingsTab('files')">文件</button>
         <button type="button" class="settings-nav-item" data-settings-tab="about" onclick="switchSettingsTab('about')">关于</button>
       </div>
@@ -1001,6 +1005,18 @@
             <label>Pi 命令</label>
             <textarea id="setPiCommands" rows="7" spellcheck="false"></textarea>
             <button type="button" class="reset-cmd-btn" onclick="resetCommandsText('pi')">恢复默认</button>
+          </div>
+        </div>
+        <div class="settings-tab" id="settingsTabTexts" style="display:none">
+          <h2>常用文本</h2>
+          <div class="set-hint" style="margin-bottom:12px">配置终端栏底部「常用文本」按钮弹出的文本条目。每行一条纯文本，点选后直接输入到当前终端（<b>不回车</b>，可继续编辑）；按会话类型分两份配置：Agent（claude / codex / pi）与命令行（cmd / Git Bash）。</div>
+          <div class="field">
+            <label>Agent 常用文本（claude / codex / pi）</label>
+            <textarea id="setAgentQuickTexts" rows="7" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label>命令行常用文本（cmd / Git Bash）</label>
+            <textarea id="setCmdQuickTexts" rows="7" spellcheck="false"></textarea>
           </div>
         </div>
         <div class="settings-tab" id="settingsTabFiles" style="display:none">
@@ -1313,8 +1329,10 @@ function createTerm(sessionId, projectId, sessionNumber, type) {
   });
 
   // 自定义键映射：
-  // - Ctrl+回车 = 插入换行（多行输入）。claude/codex 行编辑器约定 \r(回车)=提交、\n(Ctrl+J)=换行；
-  //   xterm 默认把 Ctrl+回车 当 \r 发出去（等同回车提交），这里拦截改发 \n 并阻止默认。
+  // - Ctrl+回车 / Shift+回车 = 插入换行（多行输入）。claude/codex 行编辑器约定 \r(回车)=提交、
+  //   \n(Ctrl+J)=换行；xterm 默认把带修饰键的回车一律当 \r 发出去（等同回车提交），这里把
+  //   Ctrl+回车、Shift+回车 都拦截改发 \n 并阻止默认（Shift+回车与普通回车在 xterm 默认编码下
+  //   无差别，不拦截就无法多行输入）。
   // - Ctrl+C = Windows 复制。不 preventDefault、交给浏览器原生 copy 事件（xterm 把终端选区写进
   //   剪贴板；无选区时 xterm 自身兜底：不发任何东西、不清剪贴板）。按用户要求不再发送 \x03，
   //   即放弃终端里的 Ctrl+C 中断。
@@ -1339,11 +1357,54 @@ function createTerm(sessionId, projectId, sessionNumber, type) {
         return false; // 不 preventDefault，让浏览器原生 paste 事件在 xterm textarea 上触发（与 Ctrl+Shift+V 同路径）
       }
     }
+    // Shift+回车 = 插入换行（同 Ctrl+回车）。xterm 默认对 Shift+回车与普通回车同样发 \r（提交），
+    // 这里拦截改发 \n；普通 shell 里 \n 在行首通常也被当回车执行，无副作用。
+    if (ev.type === 'keydown' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey &&
+        (ev.key === 'Enter' || ev.code === 'Enter' || ev.code === 'NumpadEnter')) {
+      ev.preventDefault();
+      sendPty('\n');
+      return false;
+    }
     return true;
   });
 
   // send 同时暴露到会话对象上，供「/」命令按钮等外部入口向该会话 PTY 写入（与键盘输入同通道）。
+
+  // 粘贴文件 → 粘贴路径：从资源管理器复制文件后，剪贴板里是文件对象而非文本，xterm 原生
+  // paste 对 files 不处理（什么都不发生）。这里监听 xterm textarea 的原生 paste 事件，
+  // 若带文件则走后端 /api/clipboard/file-paths 拿绝对路径列表，转成文本经 term.paste()
+  // 走与普通文本粘贴完全相同的管线（换行归一化 + bracketed paste）。纯文本粘贴不受影响。
+  term.textarea.addEventListener('paste', (e) => {
+    if (!e.clipboardData || e.clipboardData.files.length === 0) return; // 纯文本走 xterm 默认
+    e.preventDefault();
+    e.stopPropagation();
+    pasteFilePathsToTerm(term);
+  });
+
   termSessions.set(sessionId, { term, fit, projectId, sessionNumber, type, host, liveTitle: '', send: sendPty });
+}
+
+// ---------- 粘贴文件 → 粘贴绝对路径 ----------
+// 终端里 Ctrl+V 粘贴"从资源管理器复制的文件"时，取剪贴板文件绝对路径列表转文本粘贴。
+// 多文件用 ";" 分隔；路径含空格才包双引号（无空格加引号反而干扰某些 CLI 的路径解析）。
+// 走 term.paste() 与普通文本粘贴同管线。成功不提示（终端里出现路径即反馈），
+// 失败（PowerShell 读取剪贴板失败等）才 toast。
+async function pasteFilePathsToTerm(term) {
+  try {
+    const resp = await fetch('/api/clipboard/file-paths');
+    const data = await resp.json();
+    if (!data.ok || !Array.isArray(data.paths)) {
+      showToast(data.msg || '读取剪贴板文件路径失败', 'error');
+      return;
+    }
+    if (data.paths.length === 0) return;
+    const text = data.paths
+      .map((p) => (p.includes(' ') ? `"${p}"` : p))
+      .join(';');
+    term.paste(text);
+  } catch (e) {
+    showToast('读取剪贴板文件路径失败: ' + e.message, 'error');
+  }
 }
 
 // ---------- 终端栏「/」常用命令（底部状态栏按钮弹出） ----------
@@ -1414,7 +1475,7 @@ function sendTermCommand(sessionId, cmd) {
 
 // 点击「/」按钮开/关弹层；选择命令 = 发送 命令 + 回车（与终端回车提交语义一致）到该栏会话 PTY，随后聚焦终端。
 function toggleCmdPop(sessionId, btn) {
-  if (cmdPopEl && cmdPopEl.dataset.sessionId === sessionId) { closeCmdPop(); return; }
+  if (cmdPopEl && cmdPopEl.dataset.sessionId === sessionId && cmdPopEl.dataset.popKind === 'cmd') { closeCmdPop(); return; }
   closeCmdPop();
   const s = termSessions.get(sessionId);
   const paneBody = btn.closest('.pane-body');
@@ -1423,6 +1484,7 @@ function toggleCmdPop(sessionId, btn) {
   const pop = document.createElement('div');
   pop.className = 'cmd-pop';
   pop.dataset.sessionId = sessionId;
+  pop.dataset.popKind = 'cmd';
   pop.innerHTML = cmds.length
     ? cmds.map(c => `<div class="cmd-item" data-cmd="${escapeHtml(c.cmd)}" title="${escapeHtml(c.desc)}"><span class="cmd-name">${escapeHtml(c.cmd)}</span><span class="cmd-desc">${escapeHtml(c.desc)}</span></div>`).join('')
     : '<div class="cmd-empty">未配置命令（设置 -> 命令）</div>';
@@ -1437,9 +1499,44 @@ function toggleCmdPop(sessionId, btn) {
   cmdPopEl = pop;
 }
 
-// 点击弹层与「/」按钮以外区域时收起弹层
+// ---------- 终端栏「T」常用文本（底部状态栏按钮弹出） ----------
+// 按会话类型取配置：agent 类（claude/codex/pi）用 agentQuickTexts，命令行类（cmd/gitbash）用 cmdQuickTexts；
+// 设置 -> 常用文本 里维护，存 settings.json 同名字段。所有类型会话都显示按钮。
+// 点击条目 = 仅把文本写入该栏会话 PTY（不回车不 Tab），用户可继续编辑后自行提交。
+function getQuickTexts(type) {
+  return (type === 'cmd' || type === 'gitbash') ? (termSettings.cmdQuickTexts || []) : (termSettings.agentQuickTexts || []);
+}
+function toggleTextPop(sessionId, btn) {
+  if (cmdPopEl && cmdPopEl.dataset.sessionId === sessionId && cmdPopEl.dataset.popKind === 'text') { closeCmdPop(); return; }
+  closeCmdPop();
+  const s = termSessions.get(sessionId);
+  const paneBody = btn.closest('.pane-body');
+  if (!s || !paneBody) return;
+  const texts = getQuickTexts(s.type);
+  const pop = document.createElement('div');
+  pop.className = 'cmd-pop';
+  pop.dataset.sessionId = sessionId;
+  pop.dataset.popKind = 'text';
+  pop.innerHTML = texts.length
+    ? texts.map(t => `<div class="text-item" data-text="${escapeHtml(t)}" title="${escapeHtml(t)}">${escapeHtml(t)}</div>`).join('')
+    : '<div class="cmd-empty">未配置常用文本（设置 -> 常用文本）</div>';
+  pop.addEventListener('click', (ev) => {
+    const item = ev.target.closest('.text-item');
+    if (!item) return;
+    const text = item.dataset.text;
+    closeCmdPop();
+    const cur = termSessions.get(sessionId);
+    if (!cur || !cur.send) return;
+    try { cur.term.focus(); } catch (e) {}
+    cur.send(text);
+  });
+  paneBody.appendChild(pop);
+  cmdPopEl = pop;
+}
+
+// 点击弹层与「/」「T」按钮以外区域时收起弹层
 document.addEventListener('pointerdown', (e) => {
-  if (cmdPopEl && !e.target.closest('.cmd-pop') && !e.target.closest('.slash-btn')) closeCmdPop();
+  if (cmdPopEl && !e.target.closest('.cmd-pop') && !e.target.closest('.slash-btn') && !e.target.closest('.text-btn')) closeCmdPop();
 });
 
 // 清洗 OSC 标题：去 ANSI/控制字符，去首尾空白。为空则返回 ''（调用方据此回退到固定标题）。
@@ -1676,19 +1773,27 @@ function renderPanes() {
     }
   });
 
-  // 底部状态栏「/」按钮：仅 claude/codex/pi 会话显示（cmd 与空白栏不显示）；点击弹出常用命令列表。
-  // 程序化挂监听（非内联 onclick），p.view 即该栏显示的 sessionId。
+  // 底部状态栏按钮：「/」常用命令仅 claude/codex/pi 会话显示（cmd 与空白栏不显示）；
+  // 「T」常用文本对所有类型会话显示（仅空白栏不显示）。程序化挂监听（非内联 onclick），p.view 即该栏显示的 sessionId。
   panes.forEach(p => {
     const stEl = body.querySelector(`.pane-status[data-status-pane="${p.id}"]`);
     if (!stEl || p.view === 'empty') return;
     const s = termSessions.get(p.view);
-    if (!s || (s.type !== 'claude' && s.type !== 'codex' && s.type !== 'pi')) return;
-    const btn = document.createElement('button');
-    btn.className = 'slash-btn show';
-    btn.title = '常用命令';
-    btn.textContent = '/';
-    btn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleCmdPop(p.view, btn); });
-    stEl.appendChild(btn);
+    if (!s) return;
+    if (s.type === 'claude' || s.type === 'codex' || s.type === 'pi') {
+      const btn = document.createElement('button');
+      btn.className = 'slash-btn show';
+      btn.title = '常用命令';
+      btn.textContent = '/';
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleCmdPop(p.view, btn); });
+      stEl.appendChild(btn);
+    }
+    const tbtn = document.createElement('button');
+    tbtn.className = 'text-btn show';
+    tbtn.title = '常用文本';
+    tbtn.textContent = 'T';
+    tbtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleTextPop(p.view, tbtn); });
+    stEl.appendChild(tbtn);
   });
 
   // 所有终端栏的 fit + 同步 PTY，并聚焦激活栏。
@@ -2657,7 +2762,7 @@ const FONT_PRESETS = [
 const CUSTOM_FONT_KEY = '__custom__';
 // 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响
 const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
-const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice() };
+const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, agentQuickTexts: null, cmdQuickTexts: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice() };
 const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 24;
 
 // 命令列表 <-> 设置页 textarea 文本：每行一条「命令|中文说明」，说明可省略；空行忽略。
@@ -2677,6 +2782,12 @@ function sanitizeCommandList(list) {
     .filter(c => c && typeof c === 'object' && typeof c.cmd === 'string' && c.cmd.trim())
     .map(c => ({ cmd: c.cmd.trim(), desc: typeof c.desc === 'string' ? c.desc.trim() : '' }));
   return out.length ? out : null;
+}
+// 常用文本归一（服务端返回/迁移数据）：非空字符串数组，去空白、去重；空/非法存 null（弹层提示未配置）。
+function sanitizeQuickTextList(list) {
+  if (!Array.isArray(list)) return null;
+  const out = list.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+  return out.length ? [...new Set(out)] : null;
 }
 
 // 用户只填单个字体名时补 monospace 兜底（PTY 栅格渲染必须等宽），已有 fallback 则不重复。
@@ -2701,6 +2812,8 @@ function normalizeLocalSettings(raw) {
     claudeCommands: sanitizeCommandList(src.claudeCommands),
     codexCommands: sanitizeCommandList(src.codexCommands),
     piCommands: sanitizeCommandList(src.piCommands),
+    agentQuickTexts: sanitizeQuickTextList(src.agentQuickTexts),
+    cmdQuickTexts: sanitizeQuickTextList(src.cmdQuickTexts),
     fileHideList,
   };
 }
@@ -2821,6 +2934,9 @@ async function openSettingsModal() {
   document.getElementById('setClaudeCommands').value = commandsToText(getSlashCommands('claude'));
   document.getElementById('setCodexCommands').value = commandsToText(getSlashCommands('codex'));
   document.getElementById('setPiCommands').value = commandsToText(getSlashCommands('pi'));
+  // 常用文本页：按类型两份，每行一条回填
+  document.getElementById('setAgentQuickTexts').value = (termSettings.agentQuickTexts || []).join('\n');
+  document.getElementById('setCmdQuickTexts').value = (termSettings.cmdQuickTexts || []).join('\n');
   // 文件页：黑名单每行一条回填
   document.getElementById('setFileHideList').value = (termSettings.fileHideList || []).join('\n');
   updateSettingsPreview();
@@ -2840,6 +2956,7 @@ function switchSettingsTab(tab) {
   });
   document.getElementById('settingsTabFont').style.display = tab === 'font' ? '' : 'none';
   document.getElementById('settingsTabCommands').style.display = tab === 'commands' ? '' : 'none';
+  document.getElementById('settingsTabTexts').style.display = tab === 'texts' ? '' : 'none';
   document.getElementById('settingsTabFiles').style.display = tab === 'files' ? '' : 'none';
   document.getElementById('settingsTabAbout').style.display = tab === 'about' ? '' : 'none';
   document.getElementById('settingsSaveBtn').style.display = tab === 'about' ? 'none' : '';
@@ -2973,6 +3090,13 @@ async function saveSettings() {
   termSettings.claudeCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setClaudeCommands').value));
   termSettings.codexCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setCodexCommands').value));
   termSettings.piCommands = sanitizeCommandList(parseCommandsText(document.getElementById('setPiCommands').value));
+  // 常用文本：按类型两份，每行一条纯文本，去空行/去重；全空存 null（弹层提示未配置）
+  const parseQuickTexts = (id) => {
+    const raw = document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+    return raw.length ? [...new Set(raw)] : null;
+  };
+  termSettings.agentQuickTexts = parseQuickTexts('setAgentQuickTexts');
+  termSettings.cmdQuickTexts = parseQuickTexts('setCmdQuickTexts');
   // 文件黑名单：每行一条名称，去空行/去重；全空回退默认
   const hideRaw = document.getElementById('setFileHideList').value.split('\n').map(s => s.trim()).filter(Boolean);
   termSettings.fileHideList = hideRaw.length ? [...new Set(hideRaw)] : DEFAULT_FILE_HIDE_LIST.slice();

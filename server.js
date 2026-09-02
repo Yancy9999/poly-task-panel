@@ -222,6 +222,8 @@ const DEFAULT_SETTINGS = {
   claudeCommands: null,
   codexCommands: null,
   piCommands: null,
+  agentQuickTexts: null,
+  cmdQuickTexts: null,
   fileHideList: DEFAULT_FILE_HIDE_LIST.slice(),
 };
 // 命令列表归一：[{cmd,desc}]，cmd 非空字符串；空列表/非法结构存 null（读取端回退默认命令集）
@@ -230,6 +232,17 @@ function sanitizeCommandList(list) {
   const out = list
     .filter((c) => c && typeof c === 'object' && typeof c.cmd === 'string' && c.cmd.trim())
     .map((c) => ({ cmd: c.cmd.trim(), desc: typeof c.desc === 'string' ? c.desc.trim() : '' }));
+  return out.length ? out : null;
+}
+// 常用文本归一（终端状态栏「常用文本」按钮）：非空字符串数组，去空白、去重；空列表/非法结构存 null
+function sanitizeQuickTexts(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const s = item.trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
   return out.length ? out : null;
 }
 // 黑名单归一：字符串数组，去空白、去重；非法输入回退默认
@@ -253,6 +266,8 @@ function normalizeSettings(raw) {
     claudeCommands: sanitizeCommandList(src.claudeCommands),
     codexCommands: sanitizeCommandList(src.codexCommands),
     piCommands: sanitizeCommandList(src.piCommands),
+    agentQuickTexts: sanitizeQuickTexts(src.agentQuickTexts),
+    cmdQuickTexts: sanitizeQuickTexts(src.cmdQuickTexts),
     fileHideList: sanitizeFileHideList(src.fileHideList),
   };
 }
@@ -1019,6 +1034,33 @@ app.get('/api/projects/:id/command', (req, res) => {
   const p = getProject(req.params.id);
   if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
   res.json({ ok: true, command: generateBat(p) });
+});
+
+// 读取剪贴板文件路径：前端终端检测到粘贴的是"从资源管理器复制的文件"（clipboardData.files
+// 非空）时调用本路由。Node 读不了资源管理器的文件剪贴板，走 PowerShell
+// Get-Clipboard -Format FileDropList 拿文件绝对路径列表，前端拼好再粘进终端。
+app.get('/api/clipboard/file-paths', (req, res) => {
+  // PowerShell 端输出 Base64(UTF-8)：直接输出文本时走控制台代码页（中文 Windows 是 GBK），
+  // Node 按 utf8 解码必乱码；Base64 字节流与代码页无关，中文路径才能原样带回来。
+  const script = '[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }) -join "`n"))';
+  let r;
+  try {
+    r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, msg: '读取剪贴板文件路径失败: ' + (err.message || '') });
+  }
+  if (r.error || r.status !== 0) {
+    const detail = (r.error && r.error.message) || r.stderr || ('退出码 ' + r.status);
+    return res.status(500).json({ ok: false, msg: '读取剪贴板文件路径失败: ' + detail });
+  }
+  // Base64(UTF-8) 解码回文本，按 \n 切行（-join 拼接，无尾随空行）；空剪贴板 = 空串 = 空数组
+  const text = Buffer.from(String(r.stdout || '').trim(), 'base64').toString('utf8');
+  const paths = text ? text.split('\n').filter(Boolean) : [];
+  res.json({ ok: true, paths });
 });
 
 // 打开资源管理器：在项目目录打开一个 Windows 资源管理器窗口

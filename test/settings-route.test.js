@@ -76,6 +76,8 @@ test('GET：无 settings.json 时返回默认设置（含文件黑名单默认�
   assert.strictEqual(s.fontFamily, '"Cascadia Code", Consolas, monospace');
   assert.strictEqual(s.fontSize, 13);
   assert.strictEqual(s.claudeCommands, null);
+  assert.strictEqual(s.agentQuickTexts, null);
+  assert.strictEqual(s.cmdQuickTexts, null);
   assert.deepStrictEqual(s.fileHideList, ['.git', '.svn']);
 });
 
@@ -84,6 +86,8 @@ test('PUT：合法配置落盘，GET 回读一致，文件写入 settings.json',
     fontFamily: 'Consolas, monospace',
     fontSize: 15,
     claudeCommands: [{ cmd: '/clear', desc: '清空', extra: 'junk' }],
+    agentQuickTexts: ['  hello world  ', '', 'npm run test', 'hello world', 42, null],
+    cmdQuickTexts: ['dir ', ' ', 'dir', 7],
     fileHideList: ['.git', 'node_modules', '.git', '  '],
     evil: 'should-drop',
   });
@@ -96,6 +100,9 @@ test('PUT：合法配置落盘，GET 回读一致，文件写入 settings.json',
   assert.deepStrictEqual(s.claudeCommands, [{ cmd: '/clear', desc: '清空' }]);
   // 黑名单归一：去空白、去重
   assert.deepStrictEqual(s.fileHideList, ['.git', 'node_modules']);
+  // 常用文本归一：只留非空字符串、去空白、去重；多余字段被去掉
+  assert.deepStrictEqual(s.agentQuickTexts, ['hello world', 'npm run test']);
+  assert.deepStrictEqual(s.cmdQuickTexts, ['dir']);
   // 白名单之外的字段被过滤
   assert.strictEqual(s.evil, undefined);
 
@@ -107,6 +114,8 @@ test('PUT：合法配置落盘，GET 回读一致，文件写入 settings.json',
   const onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
   assert.strictEqual(onDisk.fontFamily, 'Consolas, monospace');
   assert.deepStrictEqual(onDisk.fileHideList, ['.git', 'node_modules']);
+  assert.deepStrictEqual(onDisk.agentQuickTexts, ['hello world', 'npm run test']);
+  assert.deepStrictEqual(onDisk.cmdQuickTexts, ['dir']);
 });
 
 test('PUT 归一兜底：越界字号夹到边界、空黑名单回默认、空命令存 null', async () => {
@@ -115,6 +124,7 @@ test('PUT 归一兜底：越界字号夹到边界、空黑名单回默认、空�
   assert.strictEqual(s.fontSize, 24); // 越界夹到上限（不回默认，保证用户输入被纠正而非丢弃）
   assert.deepStrictEqual(s.fileHideList, ['.git', '.svn']); // 空名单回默认
   assert.strictEqual(s.claudeCommands, null); // 无有效命令存 null
+  assert.strictEqual(s.agentQuickTexts, null); // 无有效常用文本存 null
 });
 
 test('PUT 空 object body：归一为默认设置而非 500', async () => {
