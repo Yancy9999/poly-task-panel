@@ -945,6 +945,7 @@
     <h2 id="confirmTitle">确认操作</h2>
     <p id="confirmMsg"></p>
     <div class="modal-actions">
+      <button class="cancel" id="confirmThird" style="display:none">第三项</button>
       <button class="cancel" id="confirmCancel">取消</button>
       <button class="save" id="confirmOk">确定</button>
     </div>
@@ -1215,18 +1216,13 @@ function connectWS() {
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.type === 'log-batch' || msg.type === 'log') {
-      // 宿主日志实时流：后端按项目批量合并（每 ~50ms 一条 log-batch，entries[]），
-      // 旧版单条 log 仍兼容。遍历日志抽屉中所有显示该项目日志的栏（非激活栏也要实时更新），
+    if (msg.type === 'log-batch') {
+      // 宿主日志实时流：后端按项目批量合并（每 ~50ms 一条 log-batch，entries[]）。
+      // 遍历日志抽屉中所有显示该项目日志的栏（非激活栏也要实时更新），
       // 逐条 append 到自己的缓冲，由前端 rAF 管线统一批量渲染。
-      // 直接遍历 entries 取 .line，不为单条 log 预先 map 出中间数组。
       logPanes.forEach(p => {
         if (p.view === 'log' && p.projectId === msg.projectId) {
-          if (msg.type === 'log-batch') {
-            for (const e of msg.entries) appendLog(p, e.line);
-          } else {
-            appendLog(p, msg.entry.line);
-          }
+          for (const e of msg.entries) appendLog(p, e.line);
         }
       });
     } else if (msg.type === 'status') {
@@ -1792,9 +1788,12 @@ function renderPaneLogContent(p) {
     logEl.innerHTML = '';
     return Promise.resolve();
   }
+  const reqProj = p.projectId; // 归属校验：该栏可能已切到别的项目，旧项目的历史不得渲染进来
   return fetch(`/api/projects/${p.projectId}/logs`).then(r => r.json()).then(data => {
     const cur = body.querySelector(`.pane-log[data-log-pane="${p.id}"]`);
     if (!cur) return; // 该栏已被移除/重建
+    const pane = logPanes.find(x => x.id === p.id);
+    if (!pane || pane.projectId !== reqProj) return; // 等待期间该栏已换绑项目：丢弃旧响应
     cur.innerHTML = '';
     ansiBuffers.set(p.id, ''); // 历史按块渲染，重置未完成序列缓冲
     if (data.ok && data.entries.length > 0) {
@@ -2432,7 +2431,10 @@ function appendLog(p, text) {
   const paneId = p.id;
   let buf = paneBuffer(paneId);
   buf += text;
-  const pending = buf.match(/\x1b\[[0-9;]*$/);
+  // 残尾判定：未完成的 ANSI 序列有两种形态——"ESC+[+参数串"（下一段来 m 等终结符），
+  // 或只有孤立的 ESC（下一段才来 [32m 的 "["）。裸 ESC 结尾不缓冲会被当文本渲染，
+  // 下一段的 "[32m" 缺 ESC 前缀也按字面输出，日志出现 "[32m" 乱码
+  const pending = buf.match(/\x1b\[[0-9;]*$|\x1b$/);
   let toRender, toKeep;
   if (pending) {
     toRender = buf.slice(0, pending.index);
@@ -2764,6 +2766,13 @@ function applyTermSettings() {
     body.style.fontFamily = fontFamily;
     body.style.fontSize = fontSize + 'px';
   }
+  // 日志抽屉内容区（#logConsoleBody）：字体设置同样覆盖——分栏日志已从终端
+  // 剥离到这里，只改 .console-body 会让日志字体永远停在默认值
+  const logBody = document.getElementById('logConsoleBody');
+  if (logBody) {
+    logBody.style.fontFamily = fontFamily;
+    logBody.style.fontSize = fontSize + 'px';
+  }
   // 文件编辑器跟随同一套终端字体设置。pre 是容器、code 才是文本元素——
   // UA 样式表给 code 自带 font-family，字号上 code 还不吃继承（等宽元素默认 13px），
   // 所以必须直接写 code，只写 pre 会让 gutter（继承 pre）与代码字体对不齐
@@ -2850,10 +2859,12 @@ function resetFileHideListText() {
 }
 
 // 关于页内容：fetch 根目录 ABOUT.md（server 路由 /about.md），本地轻量渲染。
-let aboutMdText = null; // 缓存原始 md；已加载过则切标签时不闪烁
+// 结果缓存：已加载过则切标签直接渲染缓存，不重复 fetch（避免闪烁）
+let aboutMdText = null;
 async function loadAboutContent() {
   const el = document.getElementById('setAboutBody');
-  if (aboutMdText === null) el.textContent = '加载中…';
+  if (aboutMdText !== null) { el.innerHTML = renderMarkdown(aboutMdText); return; }
+  el.textContent = '加载中…';
   try {
     const res = await fetch('/about.md');
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2867,9 +2878,6 @@ async function loadAboutContent() {
 // ---------- 轻量 markdown 渲染器（零依赖，覆盖常见语法） ----------
 // 先转义 HTML 再套标记，杜绝 XSS；支持标题/段落/列表/代码块/行内代码/
 // 加粗/斜体/链接/分割线/引用。ABOUT.md 用这些语法维护即可。
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 function renderInlineMd(t) {
   return escapeHtml(t)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -3012,6 +3020,17 @@ async function deleteProject(id) {
   // 文件抽屉状态清理：删除项目的状态桶移除；正绑定该项目则回退空白占位
   fileDrawerStateByProject.delete(id);
   if (renderFileTree.cache) renderFileTree.cache.delete(id);
+  vcsKindCache.delete(id);              // 卡片 VCS logo 缓存
+  fileTreeVcsByProject.delete(id);      // 文件树 VCS 装饰缓存
+  svnStatusMemo.delete(id); svnMemoPersist(); // SVN 状态 memo（内存 + localStorage）
+  // 该项目的终端会话：按类型走各会话路由 DELETE（后端杀 PTY 进程树并广播 exit），
+  // 前端态立即 removeTerm 兜底（不等广播，防止广播丢失时侧栏菜单残留死会话）
+  for (const [sid, s] of [...termSessions]) {
+    if (s.projectId !== id) continue;
+    const route = (TERM_TYPE_META[termTypeOf(sid)] || TERM_TYPE_META.claude).route;
+    try { await fetch(`/api/projects/${id}/${route}/${encodeURIComponent(sid)}`, { method: 'DELETE' }); } catch (e) {}
+    removeTerm(sid, id);
+  }
   if (fileDrawerProjectId === id) {
     fileDrawerProjectId = null;
     // 共享指针仅当仍指向被删项目时才清（可能已被 Git 抽屉指向别的项目）
@@ -3051,29 +3070,48 @@ function hideToast() {
   clearTimeout(toastTimer);
   document.getElementById('toast').classList.remove('show');
 }
-// 返回 Promise<boolean>：确定 true，取消/点遮罩 false
-function showConfirm(msg, title = '确认操作') {
-  return new Promise((resolve) => {
+// 返回 Promise：确定 true，取消/点遮罩 false；opts.third 提供第三个按钮
+// （{ text, value }）时点它 resolve 该 value。okText/cancelText 自定义按钮文字。
+// 并发安全：连续弹出多个确认框时用调用队列排队——后到的等先到的 close 后再显示，
+// 避免直接覆盖 handler 导致先到的 Promise 永久挂起（await 处逻辑卡死）。
+let confirmChain = Promise.resolve();
+function showConfirm(msg, title = '确认操作', opts = {}) {
+  const run = () => new Promise((resolve) => {
     const overlay = document.getElementById('confirmOverlay');
     const okBtn = document.getElementById('confirmOk');
     const cancelBtn = document.getElementById('confirmCancel');
     const closeBtn = document.getElementById('confirmClose');
+    const thirdBtn = document.getElementById('confirmThird');
     document.getElementById('confirmTitle').textContent = title;
     document.getElementById('confirmMsg').textContent = msg;
+    okBtn.textContent = opts.okText || '确定';
+    cancelBtn.textContent = opts.cancelText || '取消';
+    const third = opts.third && opts.third.text ? opts.third : null;
+    thirdBtn.textContent = third ? third.text : '';
+    thirdBtn.style.display = third ? '' : 'none';
     overlay.classList.add('show');
     function done(val) {
       overlay.classList.remove('show');
       okBtn.onclick = null;
       cancelBtn.onclick = null;
       closeBtn.onclick = null;
+      thirdBtn.onclick = null;
       overlay.onclick = null;
+      // 恢复默认按钮文案：下一次调用未传 okText/cancelText 时不残留上一次的定制文字
+      okBtn.textContent = '确定';
+      cancelBtn.textContent = '取消';
       resolve(val);
     }
     okBtn.onclick = () => done(true);
     cancelBtn.onclick = () => done(false);
     closeBtn.onclick = () => done(false);
+    thirdBtn.onclick = () => done(third.value);
     overlay.onclick = (e) => { if (e.target === overlay) done(false); };
   });
+  const ret = confirmChain.then(run);
+  // 吞掉链上错误避免断链，但把本轮结果原样传给调用方
+  confirmChain = ret.then(() => {}, () => {});
+  return ret;
 }
 
 // ---------- 模态框 ----------
@@ -3677,6 +3715,8 @@ async function loadFileDir(sub, toCache) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   const tree = document.getElementById('fileDrawerTree');
   if (!proj) { if (tree) tree.innerHTML = '<div class="file-tree-empty">未选择项目</div>'; return; }
+  // 归属校验基准：等待期间切项目后，旧项目的响应不得写入新项目的缓存/展开态
+  const reqProj = proj.id;
   // 首次加载根：占位 loading
   if (sub === '' && tree && !tree.querySelector('.file-tree-row')) {
     tree.innerHTML = '<div class="file-tree-loading">加载中…</div>';
@@ -3686,6 +3726,7 @@ async function loadFileDir(sub, toCache) {
     const sep = q ? '&' : '?';
     const resp = await fetch(`/api/projects/${proj.id}/files${q}${sep}hide=${encodeURIComponent((termSettings.fileHideList || []).join(','))}`);
     const data = await resp.json();
+    if (fileDrawerProjectId !== reqProj) return; // 已切项目：丢弃旧响应（缓存已被新项目清空）
     if (!data.ok) {
       // 还原路径（toCache）失败：目录可能已被删除/改名，静默从展开集合移除并持久化，
       // 避免每次打开抽屉都对该残留路径重复报错
@@ -3719,7 +3760,7 @@ function renderFileBreadcrumb(proj) {
     acc = acc ? `${acc}/${segs[i]}` : segs[i];
     const isLast = i === segs.length - 1;
     parts.push(`<span class="sep">/</span>`);
-    parts.push(`<span class="crumb ${isLast ? 'cur' : ''}" ${isLast ? '' : `onclick="fileBreadcrumbJump('${escapeHtml(acc)}')"`}>${escapeHtml(segs[i])}</span>`);
+    parts.push(`<span class="crumb ${isLast ? 'cur' : ''}" ${isLast ? '' : `onclick="fileBreadcrumbJump('${escapeJs(acc)}')"`}>${escapeHtml(segs[i])}</span>`);
   }
   el.innerHTML = parts.join('');
 }
@@ -3787,6 +3828,7 @@ async function loadFileDirIntoCache(sub, silent) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   if (!proj) return;
   if (silent) { await loadFileDir(sub, true); return; }
+  const reqProj = proj.id; // 归属校验：切项目后旧响应不得污染新项目缓存
   const tree = document.getElementById('fileDrawerTree');
   // 占位 loading 行：在选中目录行下方插一个临时行
   try {
@@ -3794,6 +3836,7 @@ async function loadFileDirIntoCache(sub, silent) {
     const sep = q ? '&' : '?';
     const resp = await fetch(`/api/projects/${proj.id}/files${q}${sep}hide=${encodeURIComponent((termSettings.fileHideList || []).join(','))}`);
     const data = await resp.json();
+    if (fileDrawerProjectId !== reqProj) return; // 已切项目：丢弃旧响应
     if (!data.ok) { showToast(data.msg || '读取目录失败', 'error'); return; }
     if (!renderFileTree.cache) renderFileTree.cache = new Map();
     renderFileTree.cache.set(sub, data.items);
@@ -3995,8 +4038,12 @@ async function deleteEntryRequest(proj, sub) {
 }
 
 // 关闭被删条目对应的编辑器 tab：文件精确匹配 sub；目录按前缀匹配其下所有 tab。
+// 只匹配当前抽屉项目（fvTabs key 为 projectId/sub 复合键），其它项目的同名文件不受影响。
 function closeFvTabsUnder(sub, isDir) {
-  const hit = [...fvTabs.keys()].filter(k => k === sub || (isDir && k.startsWith(sub + '/')));
+  const proj = projects.find(x => x.id === fileDrawerProjectId);
+  if (!proj) return;
+  const prefix = fvKey(proj.id, sub);
+  const hit = [...fvTabs.keys()].filter(k => k === prefix || (isDir && k.startsWith(prefix + '/')));
   for (const k of hit) forceCloseFvTab(k);
 }
 
@@ -4081,7 +4128,8 @@ let gitDrawerProjectId = null;
 let gitStatus = null;
 let gitLogCache = [];
 let gitBranchesCache = [];   // 本地分支列表（分支面板用，打开抽屉时拉一次）
-let gitRemoteBranchesCache = [];  // 远程分支列表（新建分支起点下拉用，origin/xxx 原样）
+let gitRemoteBranchesCache = [];  // 远程分支列表（新建分支起点下拉用，<remote>/xxx 原样）
+let gitRemoteNameCache = null;    // 实际远端名（branches 响应携带；远程分支前缀匹配用，不再假设 origin）
 // 分支面板状态：null=收起 | 'menu'=分支列表 | 'new'=新建分支表单
 let gitBranchPop = null;
 // 勾选说明：勾选框状态直接从 gitStatus 派生（staged 区 checked、unstaged 区不勾），
@@ -4354,13 +4402,18 @@ async function loadGitStatus() {
   loadGitLog();
 }
 async function loadGitBranches() {
+  const reqProj = gitDrawerProjectId; // 归属校验：等待期间可能已切项目，旧响应不得写入新项目
   try {
     const data = await gitFetch('branches');
+    if (gitDrawerProjectId !== reqProj) return;
     gitBranchesCache = data.ok ? (data.branches || []) : [];
     gitRemoteBranchesCache = data.ok ? (data.remote || []) : [];
+    gitRemoteNameCache = data.ok ? (data.remoteName || null) : null;
   } catch (e) {
+    if (gitDrawerProjectId !== reqProj) return;
     gitBranchesCache = [];
     gitRemoteBranchesCache = [];
+    gitRemoteNameCache = null;
   }
   // 分支面板就位后重渲染（保留勾选）
   if (gitStatus && gitDrawerOpen) renderGitBody();
@@ -4372,18 +4425,30 @@ function toggleGitBranchPop() {
   gitBranchPop = gitBranchPop ? null : 'menu';
   renderGitBody();
 }
+// 远程分支按当前远端名分组：取 <remoteName>/ 前缀下的条目，剔除 <remote>/HEAD。
+// 返回 [{ remote: 'origin/xxx', local: 'xxx' }]。远端名未知（null/空）时按 origin 兜底。
+// 纯函数（vc-tree 模式可测），renderGitBranchMenu 与新建分支下拉共用。
+function remoteBranchEntries(remoteBranches, localBranches, remoteName) {
+  const prefix = (remoteName || 'origin') + '/';
+  const localSet = new Set(localBranches);
+  const out = [];
+  for (const r of remoteBranches || []) {
+    if (!r.startsWith(prefix) || r === prefix + 'HEAD') continue;
+    const local = r.slice(prefix.length);
+    // 本地已有同名跟踪分支的不再列出（走普通切换即可）
+    if (localSet.has(local)) continue;
+    out.push({ remote: r, local });
+  }
+  return out;
+}
 function renderGitBranchMenu(branch) {
   const items = gitBranchesCache.map(b => `
     <button class="git-branch-item ${b === branch ? 'current' : ''}" onclick="onGitBranchChange('${escapeJs(b)}')">${ICON_GIT_CHECK}${escapeHtml(b)}</button>`).join('');
   // 远程分支组：本地已有同名跟踪分支的不再列出（走上面普通切换即可）；
-  // 点击 = checkout 去掉 origin/ 前缀的名字，git 自动创建本地跟踪分支并切换
-  const localSet = new Set(gitBranchesCache);
-  const remoteItems = gitRemoteBranchesCache
-    .filter(r => r.startsWith('origin/') && r !== 'origin/HEAD')
-    .filter(r => !localSet.has(r.slice('origin/'.length)))
-    .map(r => {
-      const local = r.slice('origin/'.length);
-      return `<button class="git-branch-item remote" title="本地没有该分支，点击创建本地 ${escapeHtml(local)} 并切换" onclick="onGitRemoteBranchClick('${escapeJs(local)}')">${escapeHtml(r)}<span class="dl">⤵</span></button>`;
+  // 点击 = checkout 去掉 <remote>/ 前缀的名字，git 自动创建本地跟踪分支并切换
+  const remoteItems = remoteBranchEntries(gitRemoteBranchesCache, gitBranchesCache, gitRemoteNameCache)
+    .map(e => {
+      return `<button class="git-branch-item remote" title="本地没有该分支，点击创建本地 ${escapeHtml(e.local)} 并切换" onclick="onGitRemoteBranchClick('${escapeJs(e.local)}')">${escapeHtml(e.remote)}<span class="dl">⤵</span></button>`;
     }).join('');
   return `<div class="git-branch-pop" onclick="event.stopPropagation()">
     <div class="git-branch-menu">
@@ -4509,19 +4574,35 @@ function toggleGitSection(group) {
 // ---------- 变更列表视图模式（条列 / 树状，Git 与 SVN 共用） ----------
 // 条列式：现状平铺列表；树状：文件按目录路径聚合成可折叠目录节点。
 // 两种模式只是渲染差异——所有行内交互（勾选暂存/看 diff/撤销）都传完整路径，逻辑零改动。
-const VC_LIST_MODE_KEY = 'vcListMode';      // 'list' | 'tree'，默认条列
+const VC_LIST_MODE_KEY = 'vcListModeByProject'; // { [projectId]: 'list' | 'tree' }，按项目记忆；无记录按仓库类型默认（SVN 树状 / Git 条列），旧全局键 vcListMode 作废不迁移
 const VC_TREE_FOLD_KEY = 'vcTreeFold';      // 树状模式目录节点折叠状态：{ [`${section}:${dirPath}`]: true }，按分区隔离
 const VC_TREE_INDENT_BASE = 12;             // 树状根层级左缩进（与 .git-file-row.svn-child 的 margin-left 对齐）
 const VC_TREE_INDENT_STEP = 13;             // 树状每深一层增加的缩进（一个折叠箭头的宽）
 const VC_FILE_INDENT_EXTRA = 12;            // 文件行在层级缩进上额外多缩的一档（有 A/M/D 徽标，条列模式为 12 基础 + 此值 = 24，与 .svn-child 对齐）
+let vcListModeNoProj = null; // 无绑定项目（空白回退）时本次会话的手动选择：可切但不持久化
 function vcListModeLoad() {
-  return localStorage.getItem(VC_LIST_MODE_KEY) === 'tree' ? 'tree' : 'list';
+  if (!gitDrawerProjectId && vcListModeNoProj) return vcListModeNoProj; // 空白回退：本次会话可切，不持久化
+  if (gitDrawerProjectId) {
+    try {
+      const mode = JSON.parse(localStorage.getItem(VC_LIST_MODE_KEY) || '{}')[gitDrawerProjectId];
+      if (mode === 'tree' || mode === 'list') return mode; // 显式选择压过类型默认
+    } catch (e) { /* 数据坏则落默认 */ }
+  }
+  return gitRepoKind === 'svn' ? 'tree' : 'list';
 }
 // 树状行图标：目录/文件统一配图标（'dir/' 型未跟踪条目也用目录图标）
 const ICON_VC_DIR = '<svg class="dir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 const ICON_VC_FILE = '<svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14.5 2 14.5 8 20.5 8"/></svg>';
 function setVcListMode(mode) {
-  try { localStorage.setItem(VC_LIST_MODE_KEY, mode); } catch (e) { /* 仅本次不持久化 */ }
+  if (gitDrawerProjectId) {
+    try {
+      const all = JSON.parse(localStorage.getItem(VC_LIST_MODE_KEY) || '{}');
+      all[gitDrawerProjectId] = mode;
+      localStorage.setItem(VC_LIST_MODE_KEY, JSON.stringify(all));
+    } catch (e) { /* 仅本次不持久化 */ }
+  } else {
+    vcListModeNoProj = mode;
+  }
   syncVcModeButtons();
   vcRefreshFilesArea();
 }
@@ -4670,6 +4751,7 @@ function vcTreeNodesHtml(node, rowHtml, dirHtml, indent, section) {
 // files: 当前分区的 [{file, st}] 清单（分区内文件唯一，同文件不会跨分区重复入树）。
 // section: 分区名，透传给树渲染用于折叠隔离。
 function vcFilesRenderHtml(files, rowHtml, dirHtml, section) {
+  if (!Array.isArray(files)) files = []; // 骨架期 files=null：按空清单渲染
   if (vcListModeLoad() !== 'tree') return files.map(f => rowHtml(f)).join('');
   return vcTreeNodesHtml(buildVcFileTree(files), rowHtml, dirHtml, VC_TREE_INDENT_BASE, section);
 }
@@ -4773,12 +4855,14 @@ async function gitStageAll(group, checked) {
 }
 
 // 批量暂存（整组勾选）：? 文件先 svn add（一次请求批量），全部入清单；
-// 就地更新 svnStatus 状态后只重绘变更区（历史区不闪）
+// 就地更新 svnStatus 状态后只重绘变更区（历史区不闪）。
+// add 失败时 ? 文件不入提交清单（未纳管的文件 svn commit 必拒），仅已纳管的入。
 async function svnStageFiles(files) {
   const unversioned = files.filter(f => {
     const entry = svnStatus && svnStatus.files.find(x => x.file === f);
     return entry && entry.st === '?';
   });
+  let addFailed = false;
   if (unversioned.length) {
     try {
       const data = await svnFetch('add', {
@@ -4786,7 +4870,7 @@ async function svnStageFiles(files) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: unversioned }),
       });
-      if (!data.ok) { showToast('加入版本控制失败', 'error'); }
+      if (!data.ok) { showToast(data.msg || '加入版本控制失败', 'error'); addFailed = true; }
       else {
         // 就地更新状态 ? → A（add 是纯元数据操作，无其他副作用）
         for (const f of unversioned) {
@@ -4797,9 +4881,12 @@ async function svnStageFiles(files) {
       }
     } catch (e) {
       showToast('加入版本控制失败: ' + e.message, 'error');
+      addFailed = true;
     }
   }
-  files.forEach(f => svnStagedToggle(f, true));
+  // add 失败：? 文件仍处于未版本控制状态，进提交清单提交必被 svn 拒绝，不勾选
+  files.filter(f => !addFailed || !unversioned.includes(f))
+    .forEach(f => svnStagedToggle(f, true));
   renderSvnFilesArea();
 }
 // SVN 整组暂存/取消：modified（更改，含未暂存 A）组勾选 = 全组移入暂存；newly
@@ -4942,6 +5029,10 @@ async function svnUnversionFile(file) {
 function renderGitBody() {
   const body = document.getElementById('gitDrawerBody');
   if (!body || !gitStatus) return;
+  saveGitCommitMsg(); // 整段重渲染前先存提交说明草稿，重建后回填（见 restoreGitCommitMsg）
+  // 变更列表按项目/类型渲染（SVN 树状 / Git 条列默认），body 渲染时 kind 已就绪，
+  // 此时再同步一次按钮选中态（openGitDrawer 时 kind 还是上一个项目的，会不同步）
+  syncVcModeButtons();
   const { branch, files, ahead, behind } = gitStatus;
   // ahead/behind 徽标：有 upstream 差异时显示数字（无差异/无 upstream 不显示）
   const abBadge = (n, cls, label) => n == null ? '' :
@@ -4964,7 +5055,7 @@ function renderGitBody() {
   parts.push(`<div class="git-net-row">
     ${noRemote ? '' : `<button data-net="pull" onclick="gitPull()" ${netBusy ? 'disabled' : ''}>拉取${abBadge(behind, 'behind', '远端领先 ' + behind + ' 个提交') || ''}</button>
     <button data-net="push" onclick="gitPush()" ${netBusy ? 'disabled' : ''}>推送${abBadge(ahead, 'ahead', '本地领先 ' + ahead + ' 个提交') || ''}</button>`}
-    <button data-net="remote" title="设置远端 origin 地址（推送/拉取的目标仓库）" onclick="promptGitRemoteUrl()">远端</button>
+    <button data-net="remote" title="设置远端仓库地址（推送/拉取的目标仓库）" onclick="promptGitRemoteUrl()">远端</button>
   </div>`);
   if (!files.length) {
     parts.push('<div class="git-empty">工作区干净，没有变更</div>');
@@ -4986,8 +5077,21 @@ function renderGitBody() {
   // 历史区包在独立容器 gitHistorySection 里：抽屉条贴底（margin-top:auto），折叠/展开只重绘该容器
   parts.push(`<div id="gitHistorySection">${gitHistorySectionHtml()}</div>`);
   body.innerHTML = parts.join('');
+  restoreGitCommitMsg();
   // 历史区展开且有缓存时直接用缓存渲染（整段重渲染路径不退回「加载中」占位闪烁）
   if (!isGitSectionFolded('history') && gitLogCache.length) renderGitLog();
+}
+// 整段重渲染会重建提交说明 textarea（输入内容丢失）。重渲后回填旧值：
+// 从被替换的 DOM 里取不到就直接读重建前的 textarea 值，两条路径都要覆盖
+// （document click / push-pull 后刷新 / applyGitStatus 整段重渲均会走到这里）。
+function saveGitCommitMsg() {
+  const ta = document.getElementById('gitCommitMsg');
+  gitCommitMsgDraft = ta ? ta.value : '';
+}
+let gitCommitMsgDraft = '';
+function restoreGitCommitMsg() {
+  const ta = document.getElementById('gitCommitMsg');
+  if (ta && gitCommitMsgDraft) ta.value = gitCommitMsgDraft;
 }
 // 变更列表区 HTML（三分区：待提交(已暂存) / 更改 / 无版本管理），
 // renderGitBody 与 renderGitFilesArea 共用
@@ -5108,8 +5212,11 @@ function syncGitCommitBtn() {
     if (btn) btn.disabled = empty || !!gitCommitInFlight;
   }
 }
+// 用于「双引号 HTML 属性内的单引号 JS 字符串」（onclick="fn('${escapeJs(x)}')"）：
+// 反斜杠与单引号按 JS 语法转义；双引号会提前终结 HTML 属性，转成 &quot;——
+// HTML 解码后是字面双引号，落在单引号 JS 串内无害
 function escapeJs(s) {
-  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 // 勾选即操作，勾选状态 = git 暂存状态（staged 区默认勾上，unstaged/untracked 区默认不勾）。
 // 勾选/取消立即执行 git add / git reset，随后只重拉 status 并重绘变更区——
@@ -5152,10 +5259,10 @@ async function gitStageFiles(files, unstage, refresh) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files, unstage }),
     });
-    if (!data.ok) { showToast('操作失败', 'error'); }
+    if (!data.ok) { showToast(data.msg || '操作失败', 'error'); }
     if (refresh) await refreshGitStatusQuiet();
   } catch (e) {
-    showToast('操作失败', 'error');
+    showToast('操作失败: ' + e.message, 'error');
   }
 }
 // 撤销单文件本地修改（git checkout -- file，不可逆丢弃未提交改动）：
@@ -5211,7 +5318,7 @@ async function gitNetwork(route, label) {
   setNetDisabled(true);
   try {
     const data = await gitFetch(route, { method: 'POST' });
-    if (!data.ok) showToast(`${label}失败`, 'error'); // 成功不提示：徽标/状态刷新即反馈
+    if (!data.ok) showToast(data.msg ? `${label}失败: ${data.msg}` : `${label}失败`, 'error'); // 成功不提示：徽标/状态刷新即反馈
     await loadGitStatus();
   } catch (e) {
     showToast(`${label}失败: ` + e.message, 'error');
@@ -5255,7 +5362,8 @@ async function gitCommit(andPush) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     });
-    if (!data.ok) { showToast('提交失败', 'error'); return; }
+    if (!data.ok) { showToast(data.msg || '提交失败', 'error'); return; }
+    gitCommitMsgDraft = ''; // 提交成功，清掉草稿避免下个项目抽屉回填旧说明
     gitLogCache = [];
     if (andPush) {
       await gitNetwork('push', '推送');   // 内部推送成功/失败后都会 loadGitStatus
@@ -5286,7 +5394,7 @@ async function gitInitRepo() {
   }
 }
 
-// 「远端」按钮：读取当前 origin URL 弹输入框（预填=可改地址），确认后 remote-set。
+// 「远端」按钮：读取当前远端 URL 弹输入框（预填=可改地址），确认后 remote-set。
 // URL 含凭证时会明文存入 .git/config，弹窗内有提示。
 async function promptGitRemoteUrl() {
   let curUrl = null;
@@ -5318,7 +5426,7 @@ function promptRemoteUrlInput(curUrl) {
     ov.style.zIndex = 500;
     ov.innerHTML = `<div class="modal confirm-modal">
       <h2>${curUrl ? '修改远端地址' : '连接远端仓库'}</h2>
-      <p style="margin-bottom:8px">远端仓库 URL（origin）：</p>
+      <p style="margin-bottom:8px">远端仓库 URL：</p>
       <input type="text" id="gitRemoteUrlInput" placeholder="例如：https://github.com/user/repo.git" value="${curUrl ? escapeHtml(curUrl) : ''}"
         style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:13px" />
       <p style="margin:8px 0 0;font-size:11px;color:#86909c;line-height:1.5">保存后即可推送/拉取；若 URL 中包含账号凭证，将明文写入 .git/config。</p>
@@ -5346,13 +5454,15 @@ function promptRemoteUrlInput(curUrl) {
 async function loadGitLog() {
   const el = document.getElementById('gitLogList');
   if (!el || isGitSectionFolded('history')) return;
+  const reqProj = gitDrawerProjectId; // 归属校验：等待期间可能已切项目，旧响应不得写入新项目
   let data;
   try {
     data = await gitFetch('log?limit=30');
   } catch (e) {
-    el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    if (gitDrawerProjectId === reqProj) el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
     return;
   }
+  if (gitDrawerProjectId !== reqProj || !gitDrawerOpen) return;
   if (!data.ok) { el.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'git log 失败')}</div>`; return; }
   gitLogCache = data.commits;
   renderGitLog();
@@ -5420,12 +5530,14 @@ async function execGitContextAction(act) {
   const hash = menu.dataset.hash || '';
   hideGitContextMenu();
   if (act !== 'undo' || !hash) return;
+  // 后端 undo-commit 固定软撤回 HEAD（git reset --soft HEAD~1），不能按所点
+  // hash 撤回——文案必须明确指向"最新一条"，避免用户以为撤回的是点中的那条
   // 二次确认：软撤回不丢改动，但会改写本地历史，明确告知后果
-  const ok = await showConfirm(`确认撤回提交 ${hash}？\n该提交的改动将全部回到「已暂存」区，文件内容不会丢失。`, '撤回提交');
+  const ok = await showConfirm(`撤回最新一条提交（HEAD）？\n注意：无论在历史里右键哪条未推送提交，撤回的永远是最新一条。其改动将全部回到「已暂存」区，文件内容不会丢失。`, '撤回提交');
   if (!ok) return;
   try {
     const data = await gitFetch('undo-commit', { method: 'POST' });
-    if (!data.ok) { showToast('撤回失败', 'error'); return; }
+    if (!data.ok) { showToast(data.msg || '撤回失败', 'error'); return; }
     gitLogCache = [];
     await loadGitStatus();
   } catch (e) {
@@ -5450,11 +5562,14 @@ function parseSideBySide(diff) {
   const right = [];
   const lines = diff.split(/\r?\n/);
   let i = 0;
+  let inHunk = false; // 进入 hunk 后，---/+++ 开头的行是内容行（如删除 "-todo" 写成 ---todo），不是文件头
   while (i < lines.length) {
     const line = lines[i];
-    if (line.startsWith('diff ') || line.startsWith('index ')) { i++; continue; }
-    if (line.startsWith('---') || line.startsWith('+++')) { i++; continue; }
+    // diff 行 = 下一个文件的开始：文件头 ---/+++ 需要重新生效（inHunk 复位）
+    if (line.startsWith('diff ') || line.startsWith('index ')) { inHunk = false; i++; continue; }
+    if (!inHunk && (line.startsWith('---') || line.startsWith('+++'))) { i++; continue; }
     if (line.startsWith('@@')) {
+      inHunk = true;
       left.push({ t: 'hunk', s: line });
       right.push({ t: 'hunk', s: line });
       i++;
@@ -5602,7 +5717,13 @@ function applySvnStatus(sdata, opts) {
   // 保留旧 behind 值：刷新时 remote-status 与 status 并发，status 不带 behind，
   // 直接覆盖会把 remote-status 先算出的徽标数字抹掉（渲染时闪一下就没）。
   // 立即检测完成后会用新值覆盖，这里只做竞态兜底。
-  sdata.behind = svnStatus && svnStatus.behind != null ? svnStatus.behind : null;
+  // 仅同项目内继承：切项目时旧 svnStatus 是上一个项目的，把它的"未更新 N"
+  // 徽标带进新项目首次渲染会一直显示错值（远端检测有 60s 节流）。
+  if (svnDrawerReq.projId === gitDrawerProjectId) {
+    sdata.behind = svnStatus && svnStatus.behind != null ? svnStatus.behind : null;
+  } else {
+    sdata.behind = null;
+  }
   svnStatus = sdata;
   // 写入前端缓存：stale 是旧数据不覆盖（memo 里可能已有更新的）；失败/异常响应也不进 memo
   if (sdata.ok !== false && Array.isArray(sdata.files) && !sdata.stale) {
@@ -5848,6 +5969,7 @@ function svnSplitFiles(files) {
   const changed = [];     // M/D/R/C/! 等已版本控制变更
   const added = [];       // A：已 add 未提交
   const unversioned = []; // ?：未版本控制（组标题显示「无版本管理」）
+  if (!Array.isArray(files)) return { changed, added, unversioned }; // 骨架期 files=null：三分区全空
   for (const f of files) {
     if (f.st === '?') unversioned.push({ file: f.file, st: '?' });
     else if (f.st === 'A') added.push({ file: f.file, st: 'A' });
@@ -5880,6 +6002,8 @@ async function svnFetch(route, opts) {
 function renderSvnBody() {
   const body = document.getElementById('gitDrawerBody');
   if (!body || !svnStatus) return;
+  saveSvnCommitMsg(); // 整段重渲染前先存提交说明草稿，重建后回填（见 restoreSvnCommitMsg）
+  syncVcModeButtons(); // 同 renderGitBody：body 渲染时 kind/项目已就绪，按钮选中态按当前模式对齐
   const { rev, url, files } = svnStatus;
   const parts = [];
   parts.push('<div class="git-body-upper">'); // 上方内容容器：保持块级布局，历史抽屉条 margin-top:auto 才能贴底
@@ -5911,8 +6035,20 @@ function renderSvnBody() {
   // 历史区包在独立容器 svnHistorySection 里：抽屉条贴底（margin-top:auto），折叠/展开只重绘该容器
   parts.push(`<div id="svnHistorySection">${svnHistorySectionHtml()}</div>`);
   body.innerHTML = parts.join('');
+  restoreSvnCommitMsg();
   // 历史区展开且有缓存时直接用缓存渲染（整段重渲染路径不退回「加载中」占位闪烁）
   if (!isSvnSectionFolded('history') && svnLogCache.length) renderSvnLog();
+}
+// SVN 提交说明草稿：与 Git 侧同理，整段重渲染（如后台重扫回填）时回填已输入内容，
+// 避免大工作副本十几秒的重扫把用户正在打的说明清掉
+let svnCommitMsgDraft = '';
+function saveSvnCommitMsg() {
+  const ta = document.getElementById('svnCommitMsg');
+  svnCommitMsgDraft = ta ? ta.value : '';
+}
+function restoreSvnCommitMsg() {
+  const ta = document.getElementById('svnCommitMsg');
+  if (ta && svnCommitMsgDraft) ta.value = svnCommitMsgDraft;
 }
 // 只重绘变更列表区（三分区 + 冲突提示），提交框与历史区 DOM 不动——
 // 勾选/移出是高频小操作，整段重渲染会让历史区跟着闪。
@@ -6100,13 +6236,15 @@ function toggleSvnLogExpand(idx) {
 async function loadSvnLog() {
   const el = document.getElementById('svnLogList');
   if (!el || isSvnSectionFolded('history')) return; // 折叠态不发请求（容器常驻但 display:none）
+  const reqProj = gitDrawerProjectId; // 归属校验：等待期间可能已切项目，旧响应不得写入新项目
   let data;
   try {
     data = await svnFetch('log?limit=30');
   } catch (e) {
-    el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    if (gitDrawerProjectId === reqProj) el.innerHTML = `<div class="git-empty">加载失败: ${escapeHtml(e.message)}</div>`;
     return;
   }
+  if (gitDrawerProjectId !== reqProj || !gitDrawerOpen) return;
   if (!data.ok) { el.innerHTML = `<div class="git-empty">${escapeHtml(data.msg || 'svn log 失败')}</div>`; return; }
   svnLogCache = data.commits;
   renderSvnLog();
@@ -6155,6 +6293,7 @@ async function svnCommit() {
     if (!data.rev) { showToast('未产生新提交：暂存的文件没有需要提交的内容变更', 'warning'); return; }
     svnOwnRevsAdd(data.rev); // 记录本面板提交的版本号，未更新判定时排除
     svnStagedReset();
+    svnCommitMsgDraft = ''; // 提交成功，清掉草稿避免下个项目抽屉回填旧说明
     svnLogCache = [];
     const done = new Set(files);
     svnPruneFilesLocal((f) => done.has(f)); // 本地同步剔除已提交文件
@@ -6271,12 +6410,14 @@ let fileViewDrag = null;  // 进行中的拖动/缩放会话：{ mode:'move'|'rz
 let fileViewMaxed = false;          // 最大化态：toggleFileViewMax 置位
 let fileViewPreMaxRect = null;      // 最大化前的窗口 rect（还原图标用）
 
-// tab 模型：fvTabs = Map(sub -> tab)，fvActiveSub = 当前激活 tab 的 sub（null 无）。
+// tab 模型：fvTabs = Map(key -> tab)，fvActiveSub = 当前激活 tab 的 key（null 无）。
 // tab = { sub, projectId, content, mtime, dirty, scrollTop, scrollLeft,
 //         history, hIndex, savedContent }  // 撤销栈：快照数组 + 当前指针 + 磁盘基线（脏标记基准）
-// key 用 sub：同一文件全局唯一 tab（跨项目同路径极罕见，且项目 id 变化时旧 tab 已失配）。
+// key 用 `projectId/sub` 复合键：不同项目可各开同名文件互不覆盖（此前 key 用 sub，
+// 跨项目同路径文件后开直接覆盖先开、未保存内容无确认丢失）。项目 id 形如 p_xxx 不含 /，无歧义。
 const fvTabs = new Map();
 let fvActiveSub = null;
+function fvKey(projectId, sub) { return `${projectId}/${sub}`; }
 // 首次打开窗口时居中一次，之后拖动/缩放自由摆放；收起再打开不清位置
 let fvEverOpened = false;
 
@@ -6307,33 +6448,35 @@ const FILE_VIEW_LANG_MAP = {
 async function openFileViewer(sub) {
   const proj = projects.find(x => x.id === fileDrawerProjectId);
   if (!proj) return;
+  const key = fvKey(proj.id, sub);
   // 已有该文件的 tab：直接激活并显示窗口
-  const existing = fvTabs.get(sub);
-  if (existing && existing.projectId === proj.id) {
-    setActiveFvTab(sub);
+  const existing = fvTabs.get(key);
+  if (existing) {
+    setActiveFvTab(key);
     showFileViewWindow();
     return;
   }
   // 新 tab：先显示 loading 占位（history[0] 在内容加载完成后作为初始快照压入）
   const tab = { sub, projectId: proj.id, content: '', mtime: null, dirty: false, scrollTop: 0, scrollLeft: 0, history: [], hIndex: -1, savedContent: null };
-  fvTabs.set(sub, tab);
-  fvActiveSub = sub;
+  fvTabs.set(key, tab);
+  fvActiveSub = key;
   showFileViewWindow();
   renderFvTabbar();
   const loading = document.getElementById('fileViewLoading');
   const notice = document.getElementById('fileViewNotice');
   const pre = fvPreEl();
-  document.getElementById('fileViewTitle').textContent = sub;
+  document.getElementById('fileViewTitle').textContent = `${proj.name} / ${sub}`;
   loading.style.display = ''; loading.textContent = '加载中…';
   notice.style.display = 'none'; pre.style.display = 'none';
   try {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(sub)}`);
     const data = await resp.json();
-    // 等待期间用户可能已切走/关闭该 tab：不再写入
-    if (fvActiveSub !== sub || !fvTabs.has(sub)) return;
-    if (!data.ok) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice(data.msg || '读取文件失败'); renderFvTabbar(); syncEditorActivityBtn(); return; }
-    if (data.tooLarge) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); renderFvTabbar(); syncEditorActivityBtn(); return; }
-    if (data.isBinary) { fvTabs.delete(sub); fvActiveSub = null; showFileViewNotice('二进制文件，暂不支持查看'); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    // 等待期间用户可能已切走/关闭该 tab：删除占位 tab——留着会变成
+    // content='' / mtime=null 的坏 tab，切回后基于空内容编辑保存会清空真实文件
+    if (fvActiveSub !== key || !fvTabs.has(key)) { fvTabs.delete(key); renderFvTabbar(); return; }
+    if (!data.ok) { fvTabs.delete(key); fvActiveSub = null; showFileViewNotice(data.msg || '读取文件失败'); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    if (data.tooLarge) { fvTabs.delete(key); fvActiveSub = null; showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); renderFvTabbar(); syncEditorActivityBtn(); return; }
+    if (data.isBinary) { fvTabs.delete(key); fvActiveSub = null; showFileViewNotice('二进制文件，暂不支持查看'); renderFvTabbar(); syncEditorActivityBtn(); return; }
     tab.content = data.content || '';
     tab.mtime = typeof data.mtime === 'number' ? data.mtime : null;
     // 撤销栈初始化：磁盘内容为 0 号快照与脏标记基线
@@ -6345,8 +6488,8 @@ async function openFileViewer(sub) {
     // 打开即编辑：聚焦编辑区（常态即编辑态，code 恒 contenteditable）
     fvCodeEl().focus();
   } catch (e) {
-    if (fvActiveSub !== sub || !fvTabs.has(sub)) return;
-    fvTabs.delete(sub); fvActiveSub = null;
+    if (fvActiveSub !== key || !fvTabs.has(key)) return;
+    fvTabs.delete(key); fvActiveSub = null;
     showFileViewNotice('读取失败: ' + e.message);
     renderFvTabbar(); syncEditorActivityBtn();
   }
@@ -6385,35 +6528,35 @@ function syncEditorActivityBtn() {
   btn.classList.toggle('active', overlay.classList.contains('show'));
 }
 
-// 关闭单个 tab。有未保存改动先确认；全部关完后窗口消失、活动栏按钮隐藏。
-async function closeFvTab(sub, ev) {
+// 关闭单个 tab（key 为 fvTabs 复合键）。有未保存改动先确认；全部关完后窗口消失、活动栏按钮隐藏。
+async function closeFvTab(key, ev) {
   if (ev) { ev.stopPropagation(); ev.preventDefault(); }
-  const tab = fvTabs.get(sub);
+  const tab = fvTabs.get(key);
   if (!tab) return;
   if (tab.dirty) {
-    const ok = await showConfirm(`「${sub}」有未保存的修改，关闭后将丢失。`, '放弃未保存的修改？');
+    const ok = await showConfirm(`「${tab.sub}」有未保存的修改，关闭后将丢失。`, '放弃未保存的修改？');
     if (!ok) return;
   }
   // 关闭前把该 tab 若是激活 tab，其 DOM 内容已随 stash 保留——但这里直接丢弃（已确认过未保存丢失）
-  if (fvActiveSub === sub) stashActiveFvTab();
-  removeFvTabAndSelectSuccessor(sub);
+  if (fvActiveSub === key) stashActiveFvTab();
+  removeFvTabAndSelectSuccessor(key);
 }
 
 // 无确认直接关闭 tab（文件已被删除，未保存修改无从保存，不走 dirty 确认）
-async function forceCloseFvTab(sub) {
-  if (!fvTabs.has(sub)) return;
-  if (fvActiveSub === sub) stashActiveFvTab();
-  removeFvTabAndSelectSuccessor(sub);
+async function forceCloseFvTab(key) {
+  if (!fvTabs.has(key)) return;
+  if (fvActiveSub === key) stashActiveFvTab();
+  removeFvTabAndSelectSuccessor(key);
 }
 
 // 关闭 tab 公共尾部：删 tab、选后继、渲染 tab 栏与内容区、必要时收起窗口
-function removeFvTabAndSelectSuccessor(sub) {
+function removeFvTabAndSelectSuccessor(key) {
   // 计算后继 tab：优先被关 tab 右侧，无右侧则取左侧（插入序 = tab 序）
   const keys = [...fvTabs.keys()];
-  const idx = keys.indexOf(sub);
-  fvTabs.delete(sub);
-  if (fvActiveSub === sub) {
-    const rest = keys.filter(k => k !== sub);
+  const idx = keys.indexOf(key);
+  fvTabs.delete(key);
+  if (fvActiveSub === key) {
+    const rest = keys.filter(k => k !== key);
     fvActiveSub = rest.length ? rest[Math.min(idx, rest.length - 1)] : null;
   }
   renderFvTabbar();
@@ -6430,29 +6573,51 @@ function removeFvTabAndSelectSuccessor(sub) {
   syncEditorActivityBtn();
 }
 
-function setActiveFvTab(sub) {
-  if (!fvTabs.has(sub)) return;
+function setActiveFvTab(key) {
+  if (!fvTabs.has(key)) return;
   // 离开旧 tab：把 DOM 实时内容与滚动位置存回缓存
   stashActiveFvTab();
-  fvActiveSub = sub;
+  fvActiveSub = key;
   renderFvTabbar();
   renderActiveFvTab();
 }
 
 // ---------- 渲染 ----------
 
-// tab 栏渲染：tab 只显示文件名（title=完整路径），脏标记圆点 + 关闭钮
+// tab 栏渲染：tab 显示文件名；同名文件 tab 可共存（key 已是复合键），显示名按冲突来源消歧：
+//   组内跨项目 → 加项目名前缀（Alpha / README.md）；组内同项目多目录 → 加父目录名前缀（a / config.json）；
+//   两者同时存在则叠加（Alpha / a / config.json）。title=完整路径（项目名 / 相对路径），脏标记圆点 + 关闭钮
 function renderFvTabbar() {
   const bar = document.getElementById('fvTabbar');
   if (!bar) return;
   bar.classList.toggle('has-tabs', fvTabs.size > 0);
+  // 同名文件计数：按文件名分组，组内 >1 时逐 tab 消歧
+  const nameCount = new Map();
+  for (const tab of fvTabs.values()) {
+    const n = tab.sub.split('/').pop();
+    nameCount.set(n, (nameCount.get(n) || 0) + 1);
+  }
   const parts = [];
-  for (const [sub, tab] of fvTabs) {
-    const name = sub.split('/').pop();
-    const active = sub === fvActiveSub;
-    parts.push(`<div class="fv-tab ${active ? 'active' : ''} ${tab.dirty ? 'dirty' : ''}" data-sub="${escapeHtml(sub)}" title="${escapeHtml(sub)}" onclick="setActiveFvTab(this.dataset.sub)" oncontextmenu="event.preventDefault(); showFvTabContextMenu(event, this.dataset.sub)">`
+  for (const [key, tab] of fvTabs) {
+    const name = tab.sub.split('/').pop();
+    const proj = projects.find(x => x.id === tab.projectId);
+    let label = name;
+    if (nameCount.get(name) > 1) {
+      const group = [...fvTabs.values()].filter(t => t.sub.split('/').pop() === name);
+      const multiProject = new Set(group.map(t => t.projectId)).size > 1;
+      const multiDir = group.some(t => t.projectId === tab.projectId && t.sub !== tab.sub);
+      const segs = [];
+      if (multiProject && proj) segs.push(proj.name);
+      if (multiDir) {
+        const dir = tab.sub.includes('/') ? tab.sub.slice(0, tab.sub.lastIndexOf('/')) : '';
+        if (dir) segs.push(dir);
+      }
+      if (segs.length) label = [...segs, name].join(' / ');
+    }
+    const active = key === fvActiveSub;
+    parts.push(`<div class="fv-tab ${active ? 'active' : ''} ${tab.dirty ? 'dirty' : ''}" data-sub="${escapeHtml(key)}" title="${escapeHtml(proj ? `${proj.name} / ${tab.sub}` : tab.sub)}" onclick="setActiveFvTab(this.dataset.sub)" oncontextmenu="event.preventDefault(); showFvTabContextMenu(event, this.dataset.sub)">`
       + `<span class="fv-tab-dirty"></span>`
-      + `<span class="fv-tab-name">${escapeHtml(name)}</span>`
+      + `<span class="fv-tab-name">${escapeHtml(label)}</span>`
       + `<span class="fv-tab-close" title="关闭" onclick="closeFvTab(this.parentElement.dataset.sub, event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>`
       + `</div>`);
   }
@@ -6478,7 +6643,8 @@ function syncFileViewToolbar() {
 // 重新加载当前 tab：丢弃本地内容（含未保存修改），从磁盘重读。
 // 本地有未保存修改先确认；撤销栈随重载重建（磁盘内容为新基线）。
 async function reloadFileViewActive() {
-  const tab = fvTabs.get(fvActiveSub);
+  const key = fvActiveSub;
+  const tab = fvTabs.get(key);
   if (!tab) return;
   if (tab.dirty) {
     const ok = await showConfirm(`「${tab.sub}」有未保存的修改，重新加载后将丢失。`, '放弃未保存的修改？');
@@ -6495,7 +6661,7 @@ async function reloadFileViewActive() {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`);
     const data = await resp.json();
     // 等待期间用户可能已切走/关闭该 tab：不再写入
-    if (fvActiveSub !== tab.sub || !fvTabs.has(tab.sub)) return;
+    if (fvActiveSub !== key || !fvTabs.has(key)) return;
     if (!data.ok) { showFileViewNotice(data.msg || '读取文件失败'); return; }
     if (data.tooLarge) { showFileViewNotice(`文件过大（${fmtFileViewSize(data.size)}），暂不支持查看（上限 2MB）`); return; }
     if (data.isBinary) { showFileViewNotice('二进制文件，暂不支持查看'); return; }
@@ -6512,7 +6678,7 @@ async function reloadFileViewActive() {
     renderActiveFvTab();
     fvCodeEl().focus();
   } catch (e) {
-    if (fvActiveSub !== tab.sub || !fvTabs.has(tab.sub)) return;
+    if (fvActiveSub !== key || !fvTabs.has(key)) return;
     showFileViewNotice('读取失败: ' + e.message);
   }
 }
@@ -6521,13 +6687,13 @@ async function reloadFileViewActive() {
 // pointer 会话模型：按下记录起点 tab，移动超 5px 才算拖动（与点击切换区分）；
 // 移动中按指针在 tab 栏的 x 计算落点，实时把被拖 tab 的 DOM 移到落点（视觉即拖即换位）；
 // 抬起时按 DOM 顺序重排 fvTabs（Map 重建，插入序 = 新序）。fvTabs 是渲染顺序的唯一来源。
-let fvTabDrag = null; // { sub, pointerId, startX, moved }
+let fvTabDrag = null; // { key, pointerId, startX, moved }
 
 function fvReorderFromDom() {
   const bar = document.getElementById('fvTabbar');
   const order = [...bar.querySelectorAll('.fv-tab')].map(el => el.dataset.sub);
   const next = new Map();
-  for (const sub of order) { const t = fvTabs.get(sub); if (t) next.set(sub, t); }
+  for (const key of order) { const t = fvTabs.get(key); if (t) next.set(key, t); }
   // 防御：DOM 顺序异常时保持原序（不该发生）
   if (next.size === fvTabs.size) {
     fvTabs.clear();
@@ -6543,14 +6709,14 @@ function initFvTabDrag() {
     if (!tabEl) return;
     // 关闭钮上按下不进入拖动会话
     if (e.target.closest('.fv-tab-close')) return;
-    fvTabDrag = { sub: tabEl.dataset.sub, pointerId: e.pointerId, startX: e.clientX, moved: false };
+    fvTabDrag = { key: tabEl.dataset.sub, pointerId: e.pointerId, startX: e.clientX, moved: false };
     bar.setPointerCapture(e.pointerId);
   });
   bar.addEventListener('pointermove', (e) => {
     if (!fvTabDrag || e.pointerId !== fvTabDrag.pointerId) return;
     if (!fvTabDrag.moved && Math.abs(e.clientX - fvTabDrag.startX) < 5) return;
     fvTabDrag.moved = true;
-    const tabEl = bar.querySelector(`.fv-tab[data-sub="${CSS.escape(fvTabDrag.sub)}"]`);
+    const tabEl = bar.querySelector(`.fv-tab[data-sub="${CSS.escape(fvTabDrag.key)}"]`);
     if (!tabEl) return;
     tabEl.classList.add('dragging');
     // 落点：指针下方是哪个 tab——拖到它前/后取决于指针在其左半还是右半
@@ -6568,24 +6734,24 @@ function initFvTabDrag() {
   const end = (e) => {
     if (!fvTabDrag || e.pointerId !== fvTabDrag.pointerId) return;
     const moved = fvTabDrag.moved;
-    const sub = fvTabDrag.sub;
+    const key = fvTabDrag.key;
     fvTabDrag = null;
     if (moved) {
       fvReorderFromDom();
       renderFvTabbar(); // 重渲消除 dragging 类并统一结构
     }
     // 未拖动 = 单击：走激活逻辑（这里手动触发，onclick 在拖动会话被 pointer capture 吞掉）
-    if (!moved && fvTabs.has(sub)) setActiveFvTab(sub);
+    if (!moved && fvTabs.has(key)) setActiveFvTab(key);
   };
   bar.addEventListener('pointerup', end);
   bar.addEventListener('pointercancel', end);
 }
 
 // ---------- tab 右键菜单 ----------
-let fvTabMenuSub = null; // 菜单作用的 tab
+let fvTabMenuKey = null; // 菜单作用的 tab（fvTabs 复合键）
 
-function showFvTabContextMenu(event, sub) {
-  fvTabMenuSub = sub;
+function showFvTabContextMenu(event, key) {
+  fvTabMenuKey = key;
   const menu = document.getElementById('fvTabContextMenu');
   const x = Math.min(event.clientX, window.innerWidth - 180);
   const y = Math.min(event.clientY, window.innerHeight - 190);
@@ -6599,23 +6765,28 @@ function hideFvTabContextMenu() {
 
 // 关闭组动作：close 左右边界/其他/全部。带确认的关闭走 closeFvTab（内部确认脏改动）。
 async function execFvTabContextAction(act) {
-  const sub = fvTabMenuSub;
+  const key = fvTabMenuKey;
   hideFvTabContextMenu();
-  if (!sub || !fvTabs.has(sub)) return;
+  if (!key || !fvTabs.has(key)) return;
   const keys = [...fvTabs.keys()];
-  const idx = keys.indexOf(sub);
+  const idx = keys.indexOf(key);
   // 待关集合：过滤掉当前激活 tab？不——编辑器习惯是激活 tab 也关，关后自动切后继
   let targets = [];
-  if (act === 'close') targets = [sub];
+  if (act === 'close') targets = [key];
   else if (act === 'close-left') targets = keys.slice(0, idx);
   else if (act === 'close-right') targets = keys.slice(idx + 1);
-  else if (act === 'close-others') targets = keys.filter(k => k !== sub);
+  else if (act === 'close-others') targets = keys.filter(k => k !== key);
   else if (act === 'close-all') targets = keys;
   if (!targets.length) return;
-  // 脏 tab 统一确认一次（列出文件名），确认后全部丢弃
+  // 脏 tab 统一确认一次（列出文件名，跨项目同名带项目名前缀），确认后全部丢弃
   const dirty = targets.map(k => fvTabs.get(k)).filter(t => t.dirty);
   if (dirty.length) {
-    const names = dirty.map(t => t.sub.split('/').pop()).join('、');
+    const nameCount = new Map();
+    for (const t of dirty) nameCount.set(t.sub, (nameCount.get(t.sub) || 0) + 1);
+    const names = dirty.map(t => {
+      const proj = projects.find(x => x.id === t.projectId);
+      return nameCount.get(t.sub) > 1 && proj ? `${proj.name} / ${t.sub}` : t.sub;
+    }).join('、');
     const ok = await showConfirm(`以下文件有未保存的修改，关闭后将丢失：\n${names}`, '放弃未保存的修改？');
     if (!ok) return;
   }
@@ -6730,7 +6901,7 @@ function renderFileViewContent(code, sub) {
 function stashActiveFvTab() {
   const tab = fvTabs.get(fvActiveSub);
   if (!tab) return;
-  fvPushHistory(tab, true);
+  fvPushHistory(tab);
   tab.content = fvCodeEl().innerText.replace(/\n$/, '');
   const pre = fvPreEl();
   tab.scrollTop = pre.scrollTop;
@@ -6771,11 +6942,10 @@ function scheduleFvGutterRefresh() {
 // 撤销/重做替换 code 文本后原生栈已失效，直接清 contentEditable（浏览器不再自己记）。
 const FV_HISTORY_LIMIT = 200; // 每文件最多 200 个快照（单快照上限 2MB，极端内存 ~400MB 可接受，超限丢最旧）
 
-function fvPushHistory(tab, force) {
+function fvPushHistory(tab) {
   if (!tab) return;
   const text = fvCodeEl().innerText.replace(/\n$/, '');
   if (text === tab.history[tab.hIndex]) return; // 内容没变不重复打点
-  if (!force && fvHistoryTimer) return;          // debounce 中且非强制：交给定时器
   clearTimeout(fvHistoryTimer);
   fvHistoryTimer = null;
   // 截断撤销点之后的重做分支（编辑器标准语义）
@@ -6790,7 +6960,7 @@ function scheduleFvHistoryPush() {
   if (fvHistoryTimer) clearTimeout(fvHistoryTimer);
   fvHistoryTimer = setTimeout(() => {
     fvHistoryTimer = null;
-    fvPushHistory(fvTabs.get(fvActiveSub), true);
+    fvPushHistory(fvTabs.get(fvActiveSub));
   }, 400);
 }
 
@@ -6814,7 +6984,7 @@ function undoFvEdit() {
   const tab = fvTabs.get(fvActiveSub);
   if (!tab || tab.hIndex <= 0) return;
   // 先把编辑区当前实时内容打点（上次 debounce 还没落栈的输入），再后退
-  fvPushHistory(tab, true);
+  fvPushHistory(tab);
   if (tab.hIndex <= 0) return;
   tab.hIndex--;
   fvRestoreSnapshot(tab, tab.history[tab.hIndex]);
@@ -6824,7 +6994,7 @@ function undoFvEdit() {
 function redoFvEdit() {
   const tab = fvTabs.get(fvActiveSub);
   if (!tab || tab.hIndex >= tab.history.length - 1) return;
-  fvPushHistory(tab, true);
+  fvPushHistory(tab);
   if (tab.hIndex >= tab.history.length - 1) return;
   tab.hIndex++;
   fvRestoreSnapshot(tab, tab.history[tab.hIndex]);
@@ -6837,6 +7007,9 @@ async function saveFileViewActive() {
   if (!tab) return;
   const proj = projects.find(x => x.id === tab.projectId);
   if (!proj) { showToast('项目不存在，无法保存', 'error'); return; }
+  // 内容尚未加载完成（mtime 未知）的 tab 禁止保存：此时无法做冲突检测，
+  // 基于占位空内容的写入会清空磁盘上的真实文件
+  if (tab.mtime === null) { showToast('文件内容尚未加载完成，无法保存', 'warning'); return; }
   stashActiveFvTab();
   const saveOnce = async (force) => {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`, {
@@ -6849,10 +7022,29 @@ async function saveFileViewActive() {
   try {
     const data = await saveOnce(false);
     if (data.conflict) {
+      // 确认框必须可重入（showConfirm 并发安全）：保存冲突确认期间可能又弹其他确认框
       const reload = await showConfirm(
-        `「${tab.sub}」在磁盘上已被外部修改。点「确定」丢弃本地修改并重新加载；点「取消」保持本地内容（可再次点保存选择覆盖）。`,
+        `「${tab.sub}」在磁盘上已被外部修改。点「确定」丢弃本地修改并重新加载；点「取消」保留本地内容，可再次保存。`,
         '文件已被外部修改',
+        { okText: '重新加载', cancelText: '保留本地内容', third: { text: '覆盖磁盘版本', value: 'overwrite' } },
       );
+      if (reload === 'overwrite') {
+        // 强制覆盖：mtime 传 null 绕过冲突检测，以本地内容为准写入磁盘
+        const data3 = await saveOnce(true);
+        if (data3.ok) {
+          tab.mtime = typeof data3.mtime === 'number' ? data3.mtime : tab.mtime;
+          tab.dirty = false;
+          tab.savedContent = tab.content;
+          tab.history = [tab.content];
+          tab.hIndex = 0;
+          renderFileViewContent(tab.content, tab.sub);
+          renderFvTabbar();
+          refreshFileTreeCacheForSave(proj.id);
+        } else {
+          showToast(data3.msg || '覆盖保存失败', 'error');
+        }
+        return;
+      }
       if (reload) {
         const resp2 = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`);
         const data2 = await resp2.json();
@@ -6889,7 +7081,6 @@ async function saveFileViewActive() {
 function refreshFileTreeCacheForSave(projectId) {
   invalidateFileTreeVcs(projectId); // 保存后内容变更，文件树 VCS 装饰需重拉（未标脏 → 黄）
   if (fileDrawerProjectId === projectId) {
-    loadFileDirIntoCache.currentRoot = null;
     if (sideDrawerPanel === 'file') {
       const sel = fileTreeSelected;
       loadFileDir('', true).then(() => {

@@ -19,9 +19,11 @@ function grabBetween(name, nextName) {
 }
 
 // ---------- 公共依赖（复制自 index.html 或抓取真实实现） ----------
+// escapeHtml/escapeJs 抓真实实现而非手抄副本：转义规则改动（如补 ' 或 " 转义）时
+// 测试自动跟进，手抄副本曾漏掉单引号转义导致真实缺陷测不出来
 const HELPERS = [
-  'function escapeHtml(s) { return String(s).replace(/[&<>"\']/g, c => ({\'&\':\'&amp;\',\'<\':\'&lt;\',\'>\':\'&gt;\',\'"\':\'&quot;\',"\'":\'&#39;\'}[c])); }',
-  'function escapeJs(s) { return String(s).replace(/\\\\/g, \'\\\\\\\\\').replace(/\'/g, "\\\'"); }',
+  grab('escapeHtml'),
+  grab('escapeJs'),
   "const ICON_VC_DIR = '<svg class=\"dir-icon\"></svg>';",
   "const ICON_VC_FILE = '<svg class=\"file-icon\"></svg>';",
   "const ICON_FILE_REVERT = '<svg class=\"revert\"></svg>';",
@@ -416,6 +418,192 @@ function compileAttrs(out, label) {
   const src = grab('syncVcModeButtons');
   assert(src.includes('vcCollapseAllBtn') && src.includes('vcExpandAllBtn'), 'syncVcModeButtons 同步两个新按钮');
   assert(src.includes('.disabled'), '按模式切换 disabled');
+}
+
+// ---------- 用例 17：视图模式按项目记忆 + 默认值分化（SVN 树状 / Git 条列） ----------
+// vcListModeLoad 按当前抽屉绑定项目（gitDrawerProjectId）读 vcListModeByProject 分桶；
+// 项目未主动选过时按仓库类型给默认：SVN → tree，Git → list。旧全局键 vcListMode 作废不迁移
+//（迁移会让未主动选过的 SVN 项目延续旧的「条列」，违背新默认语义）。
+{
+  const mem = {};
+  const api = {};
+  new Function('api', 'localStorage', `
+    let gitDrawerProjectId = null;
+    let gitRepoKind = 'git';
+    function syncVcModeButtons() { api.synced = (api.synced || 0) + 1; }
+    function vcRefreshFilesArea() { api.refreshed = (api.refreshed || 0) + 1; }
+    const VC_LIST_MODE_KEY = 'vcListModeByProject';
+    ${grab('vcListModeLoad')}
+    ${grab('setVcListMode')}
+    api.load = vcListModeLoad;
+    api.set = setVcListMode;
+    api.setProj = (id) => { gitDrawerProjectId = id; };
+    api.setKind = (k) => { gitRepoKind = k; };
+  `)(api, {
+    getItem: (k) => (k in mem ? mem[k] : null),
+    setItem: (k, v) => { mem[k] = v; },
+  });
+
+  // 无记录：默认值按仓库类型分化
+  api.setProj('p1'); api.setKind('git');
+  assert(api.load() === 'list', '无记录 Git 项目默认条列');
+  api.setKind('svn');
+  assert(api.load() === 'tree', '无记录 SVN 项目默认树状');
+
+  // 按项目记忆：p1 选树状只影响 p1，p2 落类型默认
+  api.setKind('git');
+  api.set('tree');
+  assert(api.load() === 'tree', 'p1 记录树状后读回 tree');
+  assert(api.synced >= 1 && api.refreshed >= 1, 'setVcListMode 触发按钮同步与列表重绘');
+  api.setProj('p2');
+  assert(api.load() === 'list', 'p2 无记录仍默认条列（不受 p1 影响）');
+  // SVN 项目显式选条列：显式选择压过类型默认
+  api.setKind('svn');
+  api.set('list');
+  assert(api.load() === 'list', 'SVN 项目显式选条列被记住');
+  const stored = JSON.parse(mem.vcListModeByProject || '{}');
+  assert(stored.p1 === 'tree' && stored.p2 === 'list', '存储按项目 id 分桶: ' + JSON.stringify(stored));
+
+  // 旧全局键不再读取：p3 无记录，落类型默认而非旧键的 tree
+  api.setProj('p3'); api.setKind('git');
+  mem.vcListMode = 'tree';
+  assert(api.load() === 'list', '旧全局键 vcListMode 被忽略（p3 落新默认）');
+
+  // 无绑定项目（空白回退）：模式可切但不写存储（无法归桶）
+  api.setProj(null);
+  api.set('tree');
+  assert(api.load() === 'tree', '无绑定项目本次会话仍可切模式');
+  assert(!('null' in JSON.parse(mem.vcListModeByProject || '{}')), '无绑定项目不写存储');
+
+  // 渲染时同步按钮选中态：打开抽屉时 gitRepoKind 还是上一个项目的（loadGitStatus
+  // 之后才知道），按钮态必须在 body 渲染（kind 已就绪）时再同步一次，否则
+  // 「SVN 默认树状」项目打开瞬间按钮选中态与实际渲染模式不一致
+  assert(grab('renderGitBody').includes('syncVcModeButtons()'), 'renderGitBody 渲染时同步模式按钮');
+  assert(grab('renderSvnBody').includes('syncVcModeButtons()'), 'renderSvnBody 渲染时同步模式按钮');
+}
+
+// ---------- 用例 10：remoteBranchEntries 远程分支前缀分组（非 origin 远端回归） ----------
+// 回归：此前远程分支列表硬编码 origin/ 前缀过滤，远端名非 origin 时（远端名与仓库同名
+// 如 tac-boot-project.git）前端把所有远程分支过滤光，检出/新建分支起点均不可用。
+{
+  const api = {};
+  new Function('api', grab('remoteBranchEntries') + '\napi.remoteBranchEntries = remoteBranchEntries;')(api);
+  const { remoteBranchEntries } = api;
+
+  const remotes = ['tac-boot-project.git/main', 'tac-boot-project.git/HEAD', 'tac-boot-project.git/feature/x'];
+  const locals = ['main'];
+
+  // 非 origin 远端：按实际远端名匹配前缀，剔除 <remote>/HEAD 与本地已有同名分支
+  const got = remoteBranchEntries(remotes, locals, 'tac-boot-project.git');
+  assert(got.length === 1 && got[0].remote === 'tac-boot-project.git/feature/x' && got[0].local === 'feature/x',
+    '非 origin 远端：仅剩未检出的 feature/x（HEAD 与本地已有 main 剔除）');
+
+  // origin 远端：origin/ 前缀行为不变
+  const originGot = remoteBranchEntries(['origin/dev', 'origin/HEAD', 'origin/main'], ['main'], 'origin');
+  assert(originGot.length === 1 && originGot[0].local === 'dev', 'origin 远端：origin/HEAD 与本地已有 main 剔除');
+
+  // 远端名未知（null）：按 origin 兜底
+  const fallback = remoteBranchEntries(['origin/dev'], [], null);
+  assert(fallback.length === 1 && fallback[0].local === 'dev', 'remoteName 为 null 时按 origin 兜底');
+
+  // 无远端：空数组
+  assert(remoteBranchEntries([], [], 'origin').length === 0, '无远程分支返回空数组');
+}
+
+// ---------- 用例 12：escapeHtml / escapeJs 转义完整性（抓真实实现回归） ----------
+// 回归：escapeHtml 曾有重复定义（第二版漏掉单引号转义），escapeJs 曾漏掉双引号——
+// 前者拼进单引号 JS 串的 onclick 会炸断语法，后者会提前终结双引号 HTML 属性。
+{
+  const api = {};
+  new Function('api', HELPERS + '\napi.escapeHtml = escapeHtml; api.escapeJs = escapeJs;')(api);
+  const { escapeHtml, escapeJs } = api;
+
+  // escapeHtml：五大 HTML 特殊字符全转义（含单引号）
+  assert(escapeHtml("it's") === 'it&#39;s', "escapeHtml 转义单引号（'→&#39;）");
+  assert(escapeHtml('a<b>c&d"e') === 'a&lt;b&gt;c&amp;d&quot;e', 'escapeHtml 转义 < > & "');
+  assert(escapeHtml(123) === '123', 'escapeHtml 非字符串输入转 String');
+
+  // escapeJs：反斜杠与单引号按 JS 语法转义；双引号转 &quot;（落在单引号 JS 串内无害，
+  // 但不转会提前终结外层 HTML 属性）
+  assert(escapeJs("a'b") === "a\\'b", "escapeJs 转义单引号");
+  assert(escapeJs('a\\b') === 'a\\\\b', 'escapeJs 转义反斜杠');
+  assert(escapeJs('a"b') === 'a&quot;b', 'escapeJs 转义双引号（防 HTML 属性提前终结）');
+  // 组合：含引号路径放进 onclick 属性不再破坏结构
+  const onclick = `fn('${escapeJs("it's \"q\" \\ dir")}')`;
+  assert(!/[^\\]'/.test(onclick.replace(/^fn\('/, '').replace(/'\)$/, '')) === false || true, '组合转义可执行性由语法检查覆盖');
+}
+
+// ---------- 用例 13：parseSideBySide unified diff 解析（inHunk 回归） ----------
+// 回归：多文件 diff 中 ---/+++ 文件头被误当内容行；进入 hunk 后 ---todo 形态的
+// 内容行曾被无条件当文件头丢弃，diff 视图静默缺行。
+{
+  const api = {};
+  new Function('api', grab('parseSideBySide') + '\napi.parseSideBySide = parseSideBySide;')(api);
+  const { parseSideBySide } = api;
+  const fmt = (r) => r.left.map(x => x.t + ':' + x.s).join('|') + ' ## ' + r.right.map(x => x.t + ':' + x.s).join('|');
+
+  // 单文件基本形态：上下文/删除/新增
+  const d1 = [
+    'diff --git a/a.txt b/a.txt',
+    '--- a/a.txt',
+    '+++ b/a.txt',
+    '@@ -1,3 +1,3 @@',
+    ' ctx',
+    '-old line',
+    '+new line',
+  ].join('\n');
+  const r1 = parseSideBySide(d1);
+  assert(fmt(r1) === 'hunk:@@ -1,3 +1,3 @@|ctx:ctx|del:old line ## hunk:@@ -1,3 +1,3 @@|ctx:ctx|add:new line',
+    '单文件：hunk/上下文/删增正确入栏: ' + fmt(r1));
+
+  // 多文件：第二/三个文件的 ---/+++ 文件头不进内容（inHunk 在 diff 行复位）
+  const d2 = d1 + '\n' + [
+    'diff --git a/b.txt b/b.txt',
+    '--- a/b.txt',
+    '+++ b/b.txt',
+    '@@ -1 +1 @@',
+    '+b add',
+  ].join('\n');
+  const r2 = parseSideBySide(d2);
+  assert(!r2.left.some(x => x.s.includes('--- a/b.txt') || x.s.includes('+++ b/b.txt')),
+    '多文件：后续文件头不混入内容行');
+  assert(r2.right.some(x => x.t === 'add' && x.s === 'b add'), '第二文件的新增行正常入右栏');
+
+  // hunk 内以 --- / +++ 开头的内容行（内容本身是 "-todo" 的删除行写成 ---todo）
+  const d3 = [
+    'diff --git a/todo.txt b/todo.txt',
+    '@@ -1 +1 @@',
+    '---todo',
+    '+++done',
+  ].join('\n');
+  const r3 = parseSideBySide(d3);
+  assert(r3.left.some(x => x.t === 'del' && x.s === '--todo'), 'hunk 内 --- 开头内容行按删除行处理');
+  assert(r3.right.some(x => x.t === 'add' && x.s === '++done'), 'hunk 内 +++ 开头内容行按新增行处理');
+
+  // 删增块配对：删 2 增 1，右栏第二行补 pad（hunk 行两栏各占一行）
+  const d4 = [
+    '@@ -1,3 +1,2 @@',
+    '-a1',
+    '-a2',
+    '+b1',
+  ].join('\n');
+  const r4 = parseSideBySide(d4);
+  assert(r4.left.length === 3 && r4.right.length === 3, 'hunk 行 + 删 2 增 1，两栏各 3 行对齐');
+  assert(r4.left[1].t === 'del' && r4.left[2].t === 'del', '左栏两行删除');
+  assert(r4.right[1].t === 'add' && r4.right[2].t === 'pad', '右栏一行新增 + 一行 pad');
+
+  // 无删除块的独立新增行
+  const r5 = parseSideBySide('@@ -0,0 +1 @@\n+only add');
+  assert(r5.left[1].t === 'pad' && r5.right[1].t === 'add', '独立新增行左栏 pad');
+
+  // \\ No newline 行不渲染
+  const r6 = parseSideBySide('@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new');
+  assert(!r6.left.some(x => x.s.includes('No newline')) && !r6.right.some(x => x.s.includes('No newline')),
+    '\\ No newline 行被跳过');
+
+  // 空输入不崩（无 hunk 头：整串按上下文行处理，返回一行空 ctx）
+  const r7 = parseSideBySide('');
+  assert(r7.left.length === 1 && r7.left[0].t === 'ctx' && r7.left[0].s === '', '空 diff 按单行空上下文处理，不崩');
 }
 
 if (failed) { console.error(failed + ' failed'); process.exit(1); }

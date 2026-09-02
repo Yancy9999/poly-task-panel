@@ -27,7 +27,7 @@ before(() => {
   fs.writeFileSync(projectsFile, JSON.stringify([
     { id: 'good', name: 'MyProj', projectPath: projRoot, type: 'folder' },
   ], null, 2));
-  process.env.PORT = '7957';
+  process.env.PORT = '7981';
   process.env.PROJECTS_FILE = projectsFile;
   process.env.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
   process.env.__PTP_TMPDIR__ = tmpDir;
@@ -45,7 +45,7 @@ function req(method, reqPath, body) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : JSON.stringify(body);
     const r = http.request({
-      host: 'localhost', port: 7957, path: reqPath, method,
+      host: 'localhost', port: 7981, path: reqPath, method,
       headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
     }, (res) => {
       let raw = '';

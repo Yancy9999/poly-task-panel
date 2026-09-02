@@ -456,6 +456,12 @@ maybe('revert: 未指定文件 400', async () => {
   assert.strictEqual(r.status, 400);
 });
 
+maybe('revert: 路径逃逸拒绝 400（沙箱校验回归）', async () => {
+  // 与 diff 同规则：不用真实系统路径，用普通逃逸路径验证沙箱逻辑
+  const r = await post('/api/projects/wc/svn/revert', { files: ['../../outside/x.txt'] });
+  assert.strictEqual(r.status, 400);
+});
+
 maybe('update: 网络操作返回输出（file:/// 无新版本，输出 ok）', async () => {
   const r = await post('/api/projects/wc/svn/update', {});
   assert.strictEqual(r.body.ok, true);

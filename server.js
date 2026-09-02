@@ -693,8 +693,9 @@ function startProject(projectId) {
   if (p.type === 'node') {
     // Node（Vite）项目直接 exec 启动命令，不经 cmd /c bat 中间层，
     // 行为更贴近在项目目录直接 `pnpm dev`，日志/信号处理也更直接。
-    const parts = p.command.split(/\s+/);
-    proc = spawn(parts[0], parts.slice(1), {
+    // shell:true 下整串命令交给 shell 解析：引号路径/带参命令（npm run x -- --y）原样可用，
+    // 按空白 split 反而会把含空格的路径切碎。
+    proc = spawn(p.command, {
       cwd: p.projectPath,
       env: process.env,
       shell: true,          // Windows 下 pnpm/npm/yarn 实为 .cmd，需要 shell 找到它们
@@ -785,7 +786,16 @@ const app = express();
 // json body 上限放宽到 3MB：编辑器保存（PUT file-content）内容上限 2MB，留余量给 JSON 包装
 app.use(express.json({ limit: '3mb' }));
 // 静态资源带短期缓存：开发期 1d，减少重复请求的重新验证。
-const staticOpts = { maxAge: '1d' };
+// index.html 例外：必须 no-cache——单文件应用的所有 JS/CSS 都内联在里面，
+// 缓存住它会导致发版后用户最长一天仍看到旧界面/旧逻辑。
+const staticOpts = {
+  maxAge: '1d',
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+};
 app.use(express.static(PUBLIC_DIR, staticOpts));
 
 // xterm.js 静态资源：前端从 /vendor/xterm/ 加载 xterm.css / xterm.js，
@@ -948,9 +958,10 @@ app.post('/api/projects/reorder', (req, res) => {
   const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, msg: '缺少 ids' });
   const byId = new Map(projects.map((p) => [p.id, p]));
-  // 校验：ids 必须恰好覆盖现有全部项目，既不多也不少，避免静默丢项
+  // 校验：ids 必须恰好覆盖现有全部项目，既不多也不少，避免静默丢项。
+  // ids 含未知 id 或重复 id 都算不一致（map 后会出现 undefined，污染 projects 数组）
   const known = ids.filter((id) => byId.has(id));
-  if (known.length !== projects.length) {
+  if (known.length !== projects.length || known.length !== ids.length) {
     return res.status(400).json({ ok: false, msg: 'ids 与现有项目不一致' });
   }
   const ordered = ids.map((id) => byId.get(id));
@@ -967,6 +978,11 @@ app.delete('/api/projects/:id', async (req, res) => {
   const p = projects[idx];
   // 先停掉运行中的进程
   await stopProject(p.id);
+  // 该项目名下的终端会话（claude/codex/cmd/gitbash/pi）一并递归杀并广播退出，
+  // 否则 PTY 会话继续存活且 cwd 指向已删目录，侧栏菜单残留
+  for (const [sessionId, rec] of [...ptySessions]) {
+    if (rec.projectId === p.id) killPtySession(sessionId, 'project deleted');
+  }
   deleteBatAndLog(p);
   projects.splice(idx, 1);
   saveProjects(projects);
@@ -1394,7 +1410,9 @@ function parseGitStatusPorcelain(stdout) {
       const head = line.slice(3);
       // 空仓库首行为 "## No commits yet on master"——branch 取行尾的分支名
       const noCommit = head.match(/^No commits yet on (.+)$/);
-      const m = noCommit ? { 1: noCommit[1] } : head.match(/^([^.\s]+)/);
+      // 分支名取 "..."（upstream 分隔）或行尾之前的整段：不能用 [^.\s]+，
+      // 否则含点号的分支名（v1.0、release/2.0.beta）会被截断
+      const m = noCommit ? { 1: noCommit[1] } : head.match(/^(.+?)(?:\.\.\.|$)/);
       branch = m ? m[1] : null;
       const aheadM = head.match(/\bahead (\d+)/);
       const behindM = head.match(/\bbehind (\d+)/);
@@ -1477,9 +1495,19 @@ function registerGitNetworkRoute(routePath, gitArgs, label) {
     res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
   });
 }
-// push 用 -u origin HEAD：不依赖 upstream 已设置，本地新建分支第一次推送即可成功，
-// -u 顺带建立跟踪关系（已有 upstream 的分支行为等价，HEAD detached 时报错同裸 push）
-registerGitNetworkRoute('push', ['push', '-u', 'origin', 'HEAD'], 'push');
+// push 用 -u <remote> HEAD：不依赖 upstream 已设置，本地新建分支第一次推送即可成功，
+// -u 顺带建立跟踪关系（已有 upstream 的分支行为等价，HEAD detached 时报错同裸 push）。
+// 远端名动态解析（优先 origin，兼容任意名字的远端）；无远端时退回 origin 让 git 报原始错误。
+app.post('/api/projects/:id/git/push', async (req, res) => {
+  const p = getGitProject(req, res);
+  if (!p) return;
+  const name = (await resolveRemoteName(p)) || 'origin';
+  const r = await runGit(p, ['push', '-u', name, 'HEAD']);
+  if (!r.ok) {
+    return res.json(r.notRepo ? { ok: false, notRepo: true } : { ok: false, msg: r.msg || 'push失败' });
+  }
+  res.json({ ok: true, msg: (r.stdout + '\n' + r.stderr).trim() });
+});
 registerGitNetworkRoute('pull', ['pull'], 'pull');
 // fetch：只更新远端跟踪指针（origin/main 等），不动工作区——
 // 供前端打开抽屉/点刷新时刷新 ahead/behind 徽标，安全无副作用
@@ -1510,8 +1538,9 @@ app.post('/api/projects/:id/git/undo-commit', async (req, res) => {
 });
 
 // 分支列表：--format 直接给 JSON 友好的字段（%(refname:short)\t%(HEAD)），避免解析 * 前缀的本地化歧义。
-// 同时附带远程分支列表（git branch -r，origin/xxx 原样），前端"新建分支"的起点下拉用；
-// 无远端时 remote 为空数组。
+// 同时附带远程分支列表（git branch -r，<remote>/xxx 原样）与实际远端名 remoteName
+// （前端"新建分支"起点下拉、远程分支检出都用 <remote>/ 前缀匹配，不再假设 origin）；
+// 无远端时 remote 为空数组、remoteName 为 null。
 app.get('/api/projects/:id/git/branches', async (req, res) => {
   const p = getGitProject(req, res);
   if (!p) return;
@@ -1529,11 +1558,12 @@ app.get('/api/projects/:id/git/branches', async (req, res) => {
     branches.push(name);
     if (isHead) current = name;
   }
+  const remoteName = await resolveRemoteName(p);
   const rr = await runGit(p, ['branch', '-r', '--format=%(refname:short)']);
   const remote = rr.ok
     ? rr.stdout.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.endsWith('/HEAD'))
     : [];
-  res.json({ ok: true, branches, current, remote });
+  res.json({ ok: true, branches, current, remote, remoteName });
 });
 
 // 版本控制类型探测（轻量）：git rev-parse 成功 → git；失败再探 svn info → svn；
@@ -1560,17 +1590,33 @@ app.post('/api/projects/:id/git/init', async (req, res) => {
   res.json({ ok: true, msg: r.stdout.trim() });
 });
 
-// 远端 origin 的读取/设置：
-// GET  remote-url  → { ok, url }（无 origin 时 url 为 null，非仓库走 notRepo）
-// POST remote-set body { url } → 已有 origin 则 set-url，否则 add origin
+// 解析仓库实际使用的远端名：优先 origin，没有则取 `git remote` 列表首个（远端名可能是
+// 任意名字，如与仓库同名的 `xxx.git`），无任何远端时返回 null。
+async function resolveRemoteName(p) {
+  const r = await runGit(p, ['remote']);
+  if (!r.ok) return null;
+  const names = r.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!names.length) return null;
+  if (names.includes('origin')) return 'origin';
+  return names[0];
+}
+
+// 远端的读取/设置（远端名优先 origin，兼容任意名字的远端）：
+// GET  remote-url  → { ok, url }（无远端时 url 为 null，非仓库走 notRepo）
+// POST remote-set body { url } → 已有远端则 set-url，否则 add origin
 // url 为任意字符串直接传给 git remote，不经 shell 无注入风险；凭证会明文存入 .git/config，前端弹窗有提示。
 app.get('/api/projects/:id/git/remote-url', async (req, res) => {
   const p = getGitProject(req, res);
   if (!p) return;
-  const r = await runGit(p, ['remote', 'get-url', 'origin']);
+  const probe = await runGit(p, ['remote']);
+  if (!probe.ok) {
+    if (probe.notRepo) return res.json({ ok: false, notRepo: true });
+    return res.json({ ok: false, msg: probe.msg || '读取远端失败' });
+  }
+  const name = await resolveRemoteName(p);
+  if (!name) return res.json({ ok: true, url: null });
+  const r = await runGit(p, ['remote', 'get-url', name]);
   if (r.ok) return res.json({ ok: true, url: r.stdout.trim() });
-  if (/No such remote/i.test(r.msg)) return res.json({ ok: true, url: null });
-  if (r.notRepo) return res.json({ ok: false, notRepo: true });
   res.json({ ok: false, msg: r.msg || '读取远端失败' });
 });
 
@@ -1579,9 +1625,10 @@ app.post('/api/projects/:id/git/remote-set', async (req, res) => {
   if (!p) return;
   const url = String((req.body && req.body.url) || '').trim();
   if (!url) return res.status(400).json({ ok: false, msg: '远端 URL 不能为空' });
-  const cur = await runGit(p, ['remote', 'get-url', 'origin']);
-  const r = cur.ok
-    ? await runGit(p, ['remote', 'set-url', 'origin', url])
+  // 已有任意远端：改写它的地址（不新增 origin，避免仓库里出现两个远端）
+  const cur = await resolveRemoteName(p);
+  const r = cur
+    ? await runGit(p, ['remote', 'set-url', cur, url])
     : await runGit(p, ['remote', 'add', 'origin', url]);
   if (!r.ok) return res.json({ ok: false, msg: r.msg || '设置远端失败' });
   res.json({ ok: true });
@@ -2274,6 +2321,15 @@ app.post('/api/projects/:id/svn/revert', async (req, res) => {
   if (!p) return;
   const files = Array.isArray(req.body && req.body.files) ? req.body.files.filter(Boolean) : [];
   if (!files.length) return res.status(400).json({ ok: false, msg: '未指定文件' });
+  // 沙箱校验每个文件（与 svn add 同规则）：revert --depth infinity 可递归作用
+  // 到目录，路径逃逸会撤销项目目录之外的文件，逃逸直接拒绝
+  for (const f of files) {
+    const target = path.resolve(path.join(p.projectPath, f));
+    const rel = path.relative(p.projectPath, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+    }
+  }
   svnStatusCacheInvalidate(p.id); // revert 改变工作副本状态，status 缓存失效
   const r = await runSvn(p, ['revert', '--depth', 'infinity', '--'].concat(files));
   if (!r.ok) {
@@ -2479,6 +2535,11 @@ wss.on('connection', (ws) => {
   });
   ws.on('close', () => clients.delete(ws));
 });
+
+// ---------------------------------------------------------------------------
+// 导出（仅供 in-process 测试使用，运行时行为不变）
+// ---------------------------------------------------------------------------
+module.exports = { broadcast, sanitizeTerminalEnv };
 
 // ---------------------------------------------------------------------------
 // 启动

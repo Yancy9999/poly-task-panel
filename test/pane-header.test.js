@@ -1,5 +1,5 @@
-// 临时验证：pane 标题栏合并（tab）+ 日志栏控制按钮 + 最右分栏图标按钮
-// 新架构：日志分栏（logPanes，渲染于 #logConsoleBody）与终端会话分栏（panes，渲染于 #consoleBody）分离。
+// pane 标题栏回归：tab 形标题合并 + 日志栏控制按钮（启动/停止/重启）+ 最右分栏图标按钮。
+// 架构：日志分栏（logPanes，渲染于 #logConsoleBody）与终端会话分栏（panes，渲染于 #consoleBody）分离。
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');

@@ -312,8 +312,8 @@ test('宿主项目启停不影响 codex 会话', async () => {
   ws_.ws.close();
 });
 
-// 解耦：删除宿主项目不杀 codex 会话（会话只借 projectPath 当 cwd）。
-test('删除宿主项目不杀 codex 会话', async () => {
+// 删除宿主项目：名下 codex 会话一并递归杀（广播 exit），不留 cwd 指向已删路径的孤儿会话。
+test('删除宿主项目杀掉名下 codex 会话', async () => {
   const pid = await createHostProject(base, base.hostProjectDir);
   const ws_ = await openWS(base);
   const a = await api(base, 'POST', `/api/projects/${pid}/codex-sessions`);
@@ -322,10 +322,11 @@ test('删除宿主项目不杀 codex 会话', async () => {
   const del = await api(base, 'DELETE', `/api/projects/${pid}`);
   assert.equal(del.json.ok, true);
 
-  // 删项目后 codex 会话不应收到 exit 事件（仍存活）。喂一行验证仍可交互。
-  ws_.ws.send(JSON.stringify({ type: 'codex-input', sessionId: a.json.sessionId, data: 'still-here\n' }));
-  const echo = await ws_.waitFor((m) => m.type === 'codex-output' && m.sessionId === a.json.sessionId && /ECHO: still-here/.test(m.data));
-  assert.ok(echo, '删除宿主项目后 codex 会话应仍存活可交互');
+  // 删项目后会话应收到 exit 事件（随项目清理），且会话列表不再包含它
+  const exit = await ws_.waitFor((m) => m.type === 'codex-session' && m.event === 'exit' && m.sessionId === a.json.sessionId);
+  assert.ok(exit, '删除宿主项目后 codex 会话应收到 exit');
+  const list = await api(base, 'GET', `/api/projects/${pid}/codex-sessions`);
+  assert.equal(list.status, 404, '项目已删除，会话列表路由应 404');
   ws_.ws.close();
 });
 

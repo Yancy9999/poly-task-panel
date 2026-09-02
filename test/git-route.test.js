@@ -114,6 +114,16 @@ test('status: ahead/behind 无 upstream 时为 null', async () => {
   assert.strictEqual(r.body.behind, null);
 });
 
+test('status: 分支名含点号不被截断（v1.0 正则回归）', async () => {
+  git(repoDir, 'checkout', '-b', 'v1.0');
+  let r = await get('/api/projects/repo/git/status');
+  assert.strictEqual(r.body.branch, 'v1.0');
+  git(repoDir, 'checkout', '-b', 'release/2.0.beta');
+  r = await get('/api/projects/repo/git/status');
+  assert.strictEqual(r.body.branch, 'release/2.0.beta');
+  git(repoDir, 'checkout', 'main');
+});
+
 test('status: 非 git 仓库返回 notRepo', async () => {
   const r = await get('/api/projects/norepo/git/status');
   assert.strictEqual(r.status, 200);
@@ -405,9 +415,73 @@ test('remote-url: 非仓库返回 notRepo（norepo 在 init 前已测，此处�
   assert.strictEqual(r.status, 404);
 });
 
+// 非 origin 远端（如远端名与仓库同名 `xxx.git`）：remote-url 应识别任意远端而非只认 origin
+test('remote-url: 远端名非 origin 时返回该远端地址', async () => {
+  // 前置：确保无 origin，仅有一个自定义名远端
+  try { git(repoDir, 'remote', 'remove', 'origin'); } catch (_) {}
+  git(repoDir, 'remote', 'add', 'tac-boot-project.git', 'https://example.com/TAC/tac-boot-project.git');
+  const r = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(r.body.ok, true);
+  assert.strictEqual(r.body.url, 'https://example.com/TAC/tac-boot-project.git', '识别非 origin 远端');
+  git(repoDir, 'remote', 'remove', 'tac-boot-project.git');
+});
+
+// remote-set 对非 origin 远端不应再 add origin（否则仓库里出现两个远端，地址改不到原远端上）
+test('remote-set: 已有非 origin 远端时不新增 origin，改写现有远端地址', async () => {
+  git(repoDir, 'remote', 'add', 'tac-boot-project.git', 'https://example.com/TAC/tac-boot-project.git');
+  const r = await post('/api/projects/repo/git/remote-set', { url: 'https://example.com/TAC/new-url.git' });
+  assert.strictEqual(r.body.ok, true);
+  const g = await get('/api/projects/repo/git/remote-url');
+  assert.strictEqual(g.body.url, 'https://example.com/TAC/new-url.git', '地址写到现有远端上');
+  assert.strictEqual(git(repoDir, 'remote').trim(), 'tac-boot-project.git', '远端列表仍只有原远端，未冒出 origin');
+  git(repoDir, 'remote', 'remove', 'tac-boot-project.git');
+});
+
+// push 硬编码 origin HEAD 对非 origin 远端必然失败：应推到实际存在的远端
+test('push: 无 origin 但有其他远端时推到该远端', async () => {
+  // 起一个裸仓库当远端，repo 推过去
+  const bareDir = path.join(tmpDir, 'bare-remote.git');
+  fs.rmSync(bareDir, { recursive: true, force: true });
+  fs.mkdirSync(bareDir, { recursive: true }); // spawnSync 要求 cwd 存在，git init 在空目录上建裸仓库
+  git(bareDir, 'init', '--bare', '-b', 'main');
+  git(repoDir, 'remote', 'add', 'tac-boot-project.git', bareDir);
+  const r = await post('/api/projects/repo/git/push');
+  assert.strictEqual(r.body.ok, true, '推送到非 origin 远端成功: ' + (r.body.msg || ''));
+  git(repoDir, 'remote', 'remove', 'tac-boot-project.git');
+  fs.rmSync(bareDir, { recursive: true, force: true });
+});
+
+// branches 响应应携带实际远端名（前端远程分支前缀匹配用，不再假设 origin）
+test('branches: 响应带 remoteName（origin / 非 origin / 无远端）', async () => {
+  // 默认仓库无远端 → remoteName 为 null
+  let r = await get('/api/projects/repo/git/branches');
+  assert.strictEqual(r.body.ok, true);
+  assert.strictEqual(r.body.remoteName, null, '无远端时 remoteName 为 null');
+  // origin 远端 → remoteName 为 origin
+  git(repoDir, 'remote', 'add', 'origin', 'https://example.com/x.git');
+  r = await get('/api/projects/repo/git/branches');
+  assert.strictEqual(r.body.remoteName, 'origin');
+  // 仅有非 origin 远端 → remoteName 为该远端名；远程分支列表以 <remoteName>/ 为前缀
+  try { git(repoDir, 'remote', 'remove', 'origin'); } catch (_) {}
+  const bareDir = path.join(tmpDir, 'bare-branches.git');
+  fs.rmSync(bareDir, { recursive: true, force: true });
+  fs.mkdirSync(bareDir, { recursive: true });
+  git(bareDir, 'init', '--bare', '-b', 'main');
+  git(repoDir, 'remote', 'add', 'tac-boot-project.git', bareDir);
+  git(repoDir, 'push', 'tac-boot-project.git', 'main'); // 造一条 <remote>/main 远程分支
+  r = await get('/api/projects/repo/git/branches');
+  assert.strictEqual(r.body.remoteName, 'tac-boot-project.git');
+  assert.ok(
+    r.body.remote.some(s => s.startsWith('tac-boot-project.git/')),
+    '远程分支列表含 <remoteName>/ 前缀条目: ' + JSON.stringify(r.body.remote),
+  );
+  git(repoDir, 'remote', 'remove', 'tac-boot-project.git');
+  fs.rmSync(bareDir, { recursive: true, force: true });
+});
+
 // 清理：删掉测试配置的 origin，不污染后续测试运行（repo 目录在 after 中删除，此处防御性清理）
 test('cleanup: 移除 repo 的 origin', async () => {
-  git(repoDir, 'remote', 'remove', 'origin');
+  try { git(repoDir, 'remote', 'remove', 'origin'); } catch (_) {} // 可能已被前面的用例清掉
   const g = await get('/api/projects/repo/git/remote-url');
   assert.strictEqual(g.body.url, null, 'origin 已清除');
 });
