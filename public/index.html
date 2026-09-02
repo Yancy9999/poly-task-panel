@@ -1009,7 +1009,7 @@
         </div>
         <div class="settings-tab" id="settingsTabTexts" style="display:none">
           <h2>常用文本</h2>
-          <div class="set-hint" style="margin-bottom:12px">配置终端栏底部「常用文本」按钮弹出的文本条目。每行一条纯文本，点选后直接输入到当前终端（<b>不回车</b>，可继续编辑）；按会话类型分两份配置：Agent（claude / codex / pi）与命令行（cmd / Git Bash）。</div>
+          <div class="set-hint" style="margin-bottom:12px">配置终端栏底部「常用文本」按钮弹出的文本条目。每行一条纯文本，点选后直接输入到当前终端（<b>不回车</b>，可继续编辑）；按会话类型分两份配置：Agent（claude / codex / pi）与命令行（cmd / Git Bash）。支持转义：<b>\r</b> 回车（末尾加 \r = 点击后直接提交）、<b>\n</b> 换行、<b>\t</b> Tab、<b>\\</b> 字面反斜杠（路径如 C:\\repos\\test）。</div>
           <div class="field">
             <label>Agent 常用文本（claude / codex / pi）</label>
             <textarea id="setAgentQuickTexts" rows="7" spellcheck="false"></textarea>
@@ -1506,6 +1506,17 @@ function toggleCmdPop(sessionId, btn) {
 function getQuickTexts(type) {
   return (type === 'cmd' || type === 'gitbash') ? (termSettings.cmdQuickTexts || []) : (termSettings.agentQuickTexts || []);
 }
+// 常用文本转义解析（仅「T」弹层条目走这里，其他输入路径不经过）：\r 回车（提交）、
+// \n 换行、\t Tab、\\ 字面反斜杠（路径场景写作 C:\\repos\\test）；未知转义按字面保留。
+function expandQuickText(text) {
+  return text.replace(/\\(.)/g, (m, ch) => {
+    if (ch === 'r') return '\r';
+    if (ch === 'n') return '\n';
+    if (ch === 't') return '\t';
+    if (ch === '\\') return '\\';
+    return m;
+  });
+}
 function toggleTextPop(sessionId, btn) {
   if (cmdPopEl && cmdPopEl.dataset.sessionId === sessionId && cmdPopEl.dataset.popKind === 'text') { closeCmdPop(); return; }
   closeCmdPop();
@@ -1528,7 +1539,7 @@ function toggleTextPop(sessionId, btn) {
     const cur = termSessions.get(sessionId);
     if (!cur || !cur.send) return;
     try { cur.term.focus(); } catch (e) {}
-    cur.send(text);
+    cur.send(expandQuickText(text));
   });
   paneBody.appendChild(pop);
   cmdPopEl = pop;
@@ -6382,9 +6393,10 @@ async function svnUpdate() {
   try {
     const data = await svnFetch('update', { method: 'POST' });
     if (!data.ok) showToast(`更新失败: ${data.msg || ''}`, 'error');
-    // 更新成功无需清徽标：下方 loadGitStatus 用全新 status 替换 svnStatus
-    //（不含 behind），重渲染后徽标自然消失；刷新按钮会再检测出真实值
-    svnStatusMemo.delete(gitDrawerProjectId); svnMemoPersist(); // update 改变 rev/文件状态，memo 作废
+    // 更新成功无需清徽标：memo 路径下后台拉到的新 status 不含 behind，
+    // diff 回填后徽标自然消失；刷新按钮会再检测出真实值
+    // 不清 memo：复用缓存走 stale-while-revalidate（与提交后刷新一致）——
+    // 旧列表秒出、后台拉新有变化才回填；清了会走骨架屏路径，大工作副本白等十几秒
     await loadGitStatus(); // 重走类型探测 + SVN/Git 渲染分发
   } catch (e) {
     showToast('更新失败: ' + e.message, 'error');
