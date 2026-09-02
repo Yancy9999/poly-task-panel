@@ -4440,6 +4440,9 @@ async function loadGitStatus() {
         gitRepoKind = 'svn';
         svnStatus = memo;
         svnDrawerReq = { projId: pid, seq: ++loadSvnSeq };
+        const req = svnDrawerReq; // 锚定本次请求：后台回包只认发起时的绑定。
+        // svnDrawerReq/loadSvnSeq 是全局可变量，切项目后新旧请求各自「projId 与
+        // seq 相互一致」，读全局做校验拦不住 A 项目的慢回包渲染/写进 B 项目的缓存
         svnOwnRevs = svnOwnRevsLoad();
         svnStagedPrune(memo.files);
         invalidateFileTreeVcs();
@@ -4449,15 +4452,18 @@ async function loadGitStatus() {
         // 凭 manual 区分「手动刷新触发的重扫」（用户在等 → 恢复转圈/禁用态并接续
         // 轮询）与「TTL 过期的例行重扫」（没人请求它 → 静默，数据到了自然回填）
         svnFetch('status-refresh-done').then((probe) => {
-          if (svnDrawerReq.projId !== gitDrawerProjectId || svnDrawerReq.seq !== loadSvnSeq) return;
+          if (svnDrawerReq !== req) return;
           const manualRescan = !!(probe.busy && probe.manual);
           // 后台静默拉最新：TTL 内秒回；过期回 stale + 例行后台重扫。
           // 有变化才 applySvnStatus 刷新 UI（quietBusy：例行 stale 不转圈）
           return svnFetch('status').then((fresh) => {
-            if (!fresh.ok || svnDrawerReq.projId !== gitDrawerProjectId || svnDrawerReq.seq !== loadSvnSeq) return;
+            if (!fresh.ok || svnDrawerReq !== req) return;
             if (JSON.stringify(fresh.files) !== JSON.stringify(memo.files) || fresh.rev !== memo.rev) {
               applySvnStatus(fresh, { quietBusy: !manualRescan }); // 有变化：更新列表
             } else {
+              // behind 只存在于前端（远端检测写入），status 响应不带；对象替换时
+              // 继承旧值，否则 memo 丢徽标数字（继承口径同 applySvnStatus）
+              fresh.behind = svnStatus.behind != null ? svnStatus.behind : null;
               svnStatus = fresh; // 无变化：仅替换对象（fetchedAt 更新），不动 UI
               svnStatusMemo.set(pid, fresh); svnMemoPersist(); // 与 svnStatus 保持同引用，add 等就地修改才不会脱钩 memo
             }
@@ -6388,22 +6394,39 @@ async function loadSvnLog() {
 async function svnUpdate() {
   if (svnNetInFlight) return;
   svnNetInFlight = true;
+  const pid = gitDrawerProjectId; // 锚定发起更新的项目：在途期间用户可能切项目
   const btn = document.querySelector('#gitDrawerBody .git-net-row button[data-net="update"]');
   if (btn) btn.disabled = true;
+  let updated = false;
   try {
     const data = await svnFetch('update', { method: 'POST' });
     if (!data.ok) showToast(`更新失败: ${data.msg || ''}`, 'error');
-    // 更新成功无需清徽标：memo 路径下后台拉到的新 status 不含 behind，
-    // diff 回填后徽标自然消失；刷新按钮会再检测出真实值
+    else updated = true;
     // 不清 memo：复用缓存走 stale-while-revalidate（与提交后刷新一致）——
     // 旧列表秒出、后台拉新有变化才回填；清了会走骨架屏路径，大工作副本白等十几秒
     await loadGitStatus(); // 重走类型探测 + SVN/Git 渲染分发
+    if (updated) {
+      // 更新成功 = 工作副本已同步到远端最新，behind 本地立即清零：memo 命中路径
+      // 下 remote-status 检测有 60s 节流，不等它——旧徽标数字会一直挂在按钮上。
+      // memo 按 pid 清（抽屉可能已切到别的项目）；svnStatus/徽标仅当前抽屉仍是
+      // 该项目才动，避免把新项目的真实未更新数字误清
+      const memo = svnStatusMemo.get(pid);
+      if (memo) { memo.behind = 0; svnMemoPersist(); }
+      if (gitDrawerProjectId === pid && svnStatus) {
+        svnStatus.behind = 0;
+        updateSvnBehindBadge();
+      }
+    }
   } catch (e) {
     showToast('更新失败: ' + e.message, 'error');
-    svnNetInFlight = false;
-    if (btn) btn.disabled = false;
   }
   svnNetInFlight = false;
+  // 显式恢复按钮可用：memo 秒出渲染发生在 svnNetInFlight 在途期间（渲染为 disabled），
+  // 而「后台 status 与缓存无变化」分支不重渲染，不在这里恢复会永久卡禁用。
+  // 重渲染路径按钮本就按 svnNetInFlight=false 渲染，重复置位无副作用。
+  // 不校验 pid：svnNetInFlight 已复位，恢复点击对任何当前项目都安全
+  const btn2 = document.querySelector('#gitDrawerBody .git-net-row button[data-net="update"]');
+  if (btn2) btn2.disabled = false;
 }
 // 提交：只提交已暂存区文件（按钮在暂存区为空时已禁用，此处兜底校验）。
 // SVN 提交即推送远端。提交成功清空模拟暂存区（所有已暂存文件都进这次提交）。
