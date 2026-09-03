@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "壳应用不需要前端调用任何 Tauri 命令，全部能力关闭。仅加载外部 http URL。",
+  "description": "前端自绘标题栏需要窗口控制能力（拖动/最小化/最大化/关闭）。窗口加载的是外部 http://localhost:<随机端口>，故远程来源按端口通配授权。",
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close"
+  ],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*"]
+  }
 }

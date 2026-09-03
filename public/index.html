@@ -17,6 +17,21 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #1d1f21; color: #e3e3e3; color-scheme: dark; height: 100vh; display: flex; flex-direction: column; }
   .main { flex: 1; display: flex; overflow: hidden; min-height: 0; padding: 0; gap: 0; }
+  /* 自绘标题栏：始终显示（浏览器/壳内一致）。左侧品牌区、中间空白区（壳内可拖动窗口）；
+     右侧窗口控制按钮仅在 Tauri 壳内显示（浏览器没有窗口可操作）。 */
+  .titlebar { display: flex; align-items: center; flex-shrink: 0; height: 36px; background: #232528; border-bottom: 1px solid #3a3c3f; user-select: none; }
+  .titlebar .tb-btns { display: none; }
+  .titlebar.tauri .tb-btns { display: flex; }
+  .titlebar .tb-left { flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; height: 100%; }
+  .titlebar .tb-left img { width: 18px; height: 18px; display: block; pointer-events: none; }
+  .titlebar .tb-name { font-size: 13px; font-weight: 600; color: #e3e3e3; white-space: nowrap; }
+  .titlebar .tb-ver { font-size: 11px; color: #86909c; white-space: nowrap; }
+  .titlebar .tb-btns { display: flex; align-items: center; height: 100%; flex-shrink: 0; }
+  /* 窗口控制按钮：全高热区（标准 Windows 标题栏交互），关闭 hover 红 */
+  .titlebar .tb-btn { width: 44px; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: #a9aeb8; cursor: pointer; border-radius: 0; transition: background .12s, color .12s; }
+  .titlebar .tb-btn:hover { background: #3a3c3f; color: #e3e3e3; }
+  .titlebar .tb-btn svg { width: 14px; height: 14px; display: block; }
+  .titlebar .tb-btn.tb-close:hover { background: #e81123; color: #fff; }
   /* 左侧固定抽屉：活动栏右边的停靠面板容器（项目/文件/Git 三选一），固定参与 flex 布局
      （挤压终端区而非浮动遮挡），点外部不收起；宽度拖拽可调并持久化，收起时 display:none。 */
   .side-drawer { width: 280px; overflow: hidden; flex-shrink: 0; display: none; flex-direction: column; transition: width .18s ease; }
@@ -24,7 +39,7 @@
   .side-drawer.dragging { transition: none; }
   .side-panel { flex: 1; min-width: 0; min-height: 0; display: none; flex-direction: column; overflow: hidden; }
   /* 三面板统一深色系（与终端区同色板 #1d1f21/#232528/#2a2e33/#3a3c3f） */
-  .panel-project, .panel-file, .panel-git { background: #1d1f21; border-right: 1px solid #3a3c3f; }
+  .panel-project, .panel-file, .panel-git, .panel-cron { background: #1d1f21; border-right: 1px solid #3a3c3f; }
   /* 拖拽分隔条：位于抽屉与 console 之间，宽度 0（不留间距），仅保留 3px 透明热区供拖拽，hover 显示蓝色手柄线 */
   .side-drawer-resizer { width: 0; flex-shrink: 0; cursor: col-resize; position: relative; }
   .side-drawer-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2px; width: 4px; border-radius: 0; background: transparent; transition: background .15s; }
@@ -142,7 +157,14 @@
   .activity-bar button:hover { background: #3a3c3f; color: #e3e3e3; }
   .activity-bar button.active { color: #165dff; background: #2a3a4f; }
   .activity-bar button svg { width: 17px; height: 17px; display: block; }
+  /* 活动栏分隔线：隔开「终端区功能（项目/文件/Git/编辑器）」与「定时任务」入口 */
+  .activity-bar .ab-divider { width: 20px; height: 1px; background: #3a3c3f; flex-shrink: 0; }
   .console-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+  /* 工作台覆盖层：定时任务模式下铺满 console-main（盖住终端分栏区 + 日志抽屉），占位「建设中」。
+     终端会话/xterm 实例不销毁，仅被盖住；退出工作台后原样恢复。 */
+  .cron-workbench { display: none; position: absolute; inset: 0; z-index: 40; background: #1d1f21; }
+  .cron-workbench.show { display: flex; align-items: center; justify-content: center; }
+  .cron-workbench-empty { color: #6b6d70; font-style: italic; font-size: 13px; }
   .console-body { flex: 1; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; min-height: 0; }
   .console-body .placeholder { color: #6b6d70; font-style: italic; }
   .pane-log { white-space: pre-wrap; word-break: break-all; }
@@ -259,6 +281,23 @@
   /* 命令查看模态框 */
   .cmd-modal { width: 640px; max-width: 90vw; }
   .cmd-pre { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 14px 16px; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto; }
+  /* claude 历史会话弹窗：摘要 + 相对时间两行列表 */
+  .claude-history-modal { width: 560px; max-width: 90vw; }
+  /* 标题醒目：本弹窗专属放大加粗（不影响其他 .modal h2） */
+  .claude-history-modal h2 { font-size: 20px; font-weight: 700; }
+  .claude-history-list { max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+  .claude-history-item { padding: 9px 12px; border-radius: 6px; border: 1px solid #3a3c3f; background: #1d1f21; cursor: pointer; transition: all .12s; }
+  .claude-history-item:hover { background: #2a2e33; border-color: #4e5969; }
+  .claude-history-summary { font-size: 13px; color: #e3e3e3; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .claude-history-time { font-size: 11px; color: #86909c; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .claude-history-loading { text-align: center; font-size: 11px; color: #86909c; padding: 6px 0; }
+  /* 上下文徽标：配色复用项目类型 badge 色系，按大小分档（小绿/中蓝/大橙） */
+  .ctx-badge { font-size: 10px; padding: 1px 7px; border-radius: 9px; font-weight: 500; line-height: 14px; }
+  .ctx-badge.s { background: #173b1f; color: #4cd964; }
+  .ctx-badge.m { background: #1c2f4a; color: #79a8ff; }
+  .ctx-badge.l { background: #4a3315; color: #ff8f1f; }
+  /* 贴抽屉模式:左缘锚定抽屉右缘(padding-left 由 JS 按抽屉实际宽度写入),垂直仍居中 */
+  .modal-overlay.anchored-drawer { justify-content: flex-start; }
   /* 终端会话二级菜单：有会话时才显示，下挂各会话窗口 */
   .sub-menu { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
   .sub-menu-group { padding: 5px 12px 3px; font-size: 11px; color: #86909c; font-weight: 600; }
@@ -699,6 +738,22 @@
 </head>
 <body>
 
+<!-- 自绘标题栏：浏览器/壳内都显示。左侧 logo+名称+版本号；中间空白在壳内可拖动窗口
+     （data-tauri-drag-region，双击=最大化/还原）；右侧最小化/最大化/关闭按钮仅壳内显示
+     （走 window.__TAURI__ 窗口 API，浏览器没有窗口可操作故隐藏）。 -->
+<div class="titlebar" id="titlebar">
+  <div class="tb-left" data-tauri-drag-region>
+    <img src="/logo.png" alt="" draggable="false">
+    <span class="tb-name" data-tauri-drag-region>多元任务面板</span>
+    <span class="tb-ver" id="tbVersion" data-tauri-drag-region></span>
+  </div>
+  <div class="tb-btns">
+    <button class="tb-btn" id="tbMin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+    <button class="tb-btn" id="tbMax"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="1"/></svg></button>
+    <button class="tb-btn tb-close" id="tbClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+  </div>
+</div>
+
 <div class="main">
   <!-- 活动栏：最左缘窄竖条，项目/文件/Git 三面板的开关图标（与面板开态联动高亮），
        底部齿轮为设置入口。点击展开对应面板，再点同一按钮收起整个抽屉。 -->
@@ -707,6 +762,9 @@
     <button id="activityFileBtn" title="文件目录浏览" onclick="toggleSidePanel('file')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></button>
     <button id="activityGitBtn" title="版本管理（Git / SVN）" onclick="toggleSidePanel('git')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
     <button id="activityEditorBtn" title="文件编辑器" onclick="toggleFileViewWindow()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    <div class="ab-divider" id="abDivider"></div>
+    <button id="activityTaskBtn" title="任务" onclick="toggleTaskWorkbench()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg></button>
+    <button id="activityCronBtn" title="定时任务" onclick="toggleCronWorkbench()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
     <button class="gear-btn" title="设置（终端/日志字体）" onclick="openSettingsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </div>
   <!-- 左侧固定抽屉：三面板共用一个停靠容器（互斥显示），固定挤压终端区，点外部不收起 -->
@@ -753,6 +811,22 @@
         <div class="git-empty">未选择项目</div>
       </div>
     </div>
+    <!-- 任务面板：header 与文件/Git 面板同构；关闭按钮只收抽屉（不影响工作台态） -->
+    <div class="side-panel panel-cron" id="panelTask">
+      <div class="git-drawer-header">
+        <span class="git-drawer-title">任务</span>
+        <button class="pane-btn" title="关闭" onclick="closeTaskDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </div>
+      <div class="git-drawer-body"><div class="git-empty">建设中</div></div>
+    </div>
+    <!-- 定时任务面板：header 与文件/Git 面板同构；关闭按钮只收抽屉（不影响工作台态） -->
+    <div class="side-panel panel-cron" id="panelCron">
+      <div class="git-drawer-header">
+        <span class="git-drawer-title">定时任务</span>
+        <button class="pane-btn" title="关闭" onclick="closeCronDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </div>
+      <div class="git-drawer-body"><div class="git-empty">建设中</div></div>
+    </div>
   </div>
   <!-- 抽屉调宽拖拽条：位于抽屉与终端区之间，三面板共用同一宽度 -->
   <div class="side-drawer-resizer" id="sideDrawerResizer"></div>
@@ -762,6 +836,10 @@
          每栏 .pane-header = 标题栏条：左侧 .pane-tab（tab 形状标题），右侧 .pane-tools（关闭 + 分栏按钮，
          分栏按钮仅最右栏显示，描边高亮与 tab 明显区分）。布局持久化到 localStorage（paneLayout）。 -->
     <div class="console-body" id="consoleBody"></div>
+    <!-- 工作台覆盖层：任务/定时任务共用（同终端分栏区被多个功能共用），铺满 console-main
+         （终端分栏区 + 日志抽屉一并覆盖）。show 类切换显隐；终端会话/xterm 实例不受影响，
+         切回原样恢复；当前功能由 #workbench 持久化值（task/cron）决定。 -->
+    <div class="cron-workbench" id="workbench"><div class="cron-workbench-empty">建设中</div></div>
     <!-- xterm 隐藏暂存区：未显示的会话 xterm 实例统一挂这里（display:none），
          某栏显示该会话时再把对应 .term-host 节点移入该栏 body，杜绝脱离 DOM 导致 fit 失效。 -->
     <div id="xtermWrap"></div>
@@ -836,6 +914,18 @@
     <pre class="cmd-pre" id="cmdContent">加载中...</pre>
     <div class="modal-actions">
       <button class="cancel" onclick="closeCmdModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- agent 历史会话弹窗（claude/codex/pi 通用）：摘要 + 相对时间，点选后按 CLI 各自方式恢复 -->
+<div class="modal-overlay" id="agentHistoryOverlay">
+  <div class="modal claude-history-modal">
+    <button type="button" class="modal-close" onclick="closeAgentHistoryModal()" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+    <h2 id="agentHistoryTitle">历史会话</h2>
+    <div class="claude-history-list" id="agentHistoryList">加载中...</div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeAgentHistoryModal()">关闭</button>
     </div>
   </div>
 </div>
@@ -938,6 +1028,16 @@
 <!-- Git 历史右键菜单：未推送的提交可软撤回（复用文件树菜单深色样式） -->
 <div class="file-context-menu" id="gitContextMenu">
   <button data-act="undo">撤回此提交（软撤回）</button>
+</div>
+
+<!-- agent 按钮（claude/codex/pi）右键菜单：入口为「历史会话」弹窗 -->
+<div class="file-context-menu" id="agentBtnContextMenu">
+  <button data-act="history">历史会话</button>
+</div>
+
+<!-- 文件目录按钮右键菜单：在资源管理器中打开项目目录 -->
+<div class="file-context-menu" id="fileBtnContextMenu">
+  <button data-act="reveal">在资源管理器中打开</button>
 </div>
 
 <!-- 自绘确认框（替代原生 confirm） -->
@@ -2308,12 +2408,12 @@ function renderList() {
     // onclick stopPropagation 阻止冒泡到卡片 selectProject，避免误触切回日志视图/重拉历史。
     const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
         <div class="term-new-row">
-          <button title="文件目录浏览（切换到该项目目录）" onclick="event.stopPropagation(); openFileDrawer('${p.id}')"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+          <button title="文件目录浏览（切换到该项目目录；右键：在资源管理器中打开）" data-project-id="${p.id}" onclick="event.stopPropagation(); openFileDrawer('${p.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showFileBtnContextMenu(event)"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
           <button title="版本管理（Git / SVN：状态/提交/更新/历史）" onclick="event.stopPropagation(); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
-          <button id="shellBtn-${p.id}" title="打开终端（cmd / Git Bash）" onclick="event.stopPropagation(); toggleShellMenu(event, '${p.id}')">${CMD_LOGO}</button>
-          <button title="新建 claude 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')">${CLAUDE_LOGO}</button>
-          <button title="新建 codex 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')">${CODEX_LOGO}</button>
-          <button title="新建 pi 会话" onclick="event.stopPropagation(); newTermSession('${p.id}','pi')">${PI_LOGO}</button>
+          <button id="shellBtn-${p.id}" title="打开 cmd（右键：cmd / Git Bash）" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')" oncontextmenu="event.preventDefault(); event.stopPropagation(); toggleShellMenu(event, '${p.id}')">${CMD_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="claude" title="新建 claude 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CLAUDE_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="codex" title="新建 codex 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CODEX_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="pi" title="新建 pi 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','pi')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${PI_LOGO}</button>
         </div>
         ${subMenu}
       </div>`;
@@ -2756,6 +2856,183 @@ async function showCommand(id) {
 function closeCmdModal() {
   document.getElementById('cmdOverlay').classList.remove('show');
 }
+
+// ---------- 文件目录按钮右键菜单 ----------
+// 右键项目卡片的文件目录按钮 → 菜单「在资源管理器中打开」（复用 file-context-menu 模式）。
+// 左键仍是打开文件抽屉，见 renderList 里的按钮 onclick。
+function showFileBtnContextMenu(e) {
+  hideFileBtnContextMenu();
+  const menu = document.getElementById('fileBtnContextMenu');
+  menu.dataset.projectId = e.currentTarget ? e.currentTarget.dataset.projectId : '';
+  const x = Math.min(e.clientX, window.innerWidth - 180);
+  const y = Math.min(e.clientY, window.innerHeight - 50);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+}
+function hideFileBtnContextMenu() {
+  document.getElementById('fileBtnContextMenu').classList.remove('show');
+}
+(function () {
+  const menu = document.getElementById('fileBtnContextMenu');
+  menu.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); execFileBtnContextAction(b.dataset.act); });
+  });
+  document.addEventListener('click', hideFileBtnContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('#fileBtnContextMenu') && !e.target.closest('.term-new-row button[title^="文件目录浏览"]')) hideFileBtnContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideFileBtnContextMenu(); });
+  window.addEventListener('blur', hideFileBtnContextMenu);
+})();
+async function execFileBtnContextAction(act) {
+  const menu = document.getElementById('fileBtnContextMenu');
+  const projectId = menu.dataset.projectId || '';
+  hideFileBtnContextMenu();
+  if (act !== 'reveal' || !projectId) return;
+  openExplorer(projectId);
+}
+
+// ---------- agent 按钮右键菜单 + 历史会话弹窗（claude/codex/pi 通用） ----------
+// 右键 agent 按钮 → 菜单「历史会话」→ 弹窗列出该 CLI 本地该项目的历史会话
+// （摘要 + 最后活动时间），点选后按 CLI 各自方式恢复（claude --resume /
+// codex resume 子命令 / pi --session，参数由后端按类型映射）到终端分栏。
+// 菜单复用 gitContextMenu 的 file-context-menu 模式；弹窗复用 cmdOverlay 模式。
+function showAgentBtnContextMenu(e) {
+  hideAgentBtnContextMenu();
+  const menu = document.getElementById('agentBtnContextMenu');
+  const t = e.currentTarget ? e.currentTarget.dataset : {};
+  menu.dataset.projectId = t.projectId || '';
+  menu.dataset.agentType = t.agentType || '';
+  const x = Math.min(e.clientX, window.innerWidth - 180);
+  const y = Math.min(e.clientY, window.innerHeight - 50);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+}
+function hideAgentBtnContextMenu() {
+  document.getElementById('agentBtnContextMenu').classList.remove('show');
+}
+const AGENT_HISTORY_LABELS = { claude: 'claude', codex: 'codex', pi: 'pi' };
+async function openAgentHistoryModal(projectId, agentType) {
+  hideAgentBtnContextMenu();
+  const p = projects.find(x => x.id === projectId);
+  if (!p) return;
+  document.getElementById('agentHistoryTitle').textContent = `历史会话 - ${p.name}（${AGENT_HISTORY_LABELS[agentType] || agentType}）`;
+  const overlay = document.getElementById('agentHistoryOverlay');
+  // 弹窗左缘贴固定抽屉右缘(+12px 间距),垂直仍居中;抽屉未展开时清除偏移回退全屏居中
+  const drawer = document.getElementById('sideDrawer');
+  if (drawer && drawer.classList.contains('open')) {
+    overlay.classList.add('anchored-drawer');
+    overlay.style.paddingLeft = (drawer.getBoundingClientRect().right + 12) + 'px';
+  } else {
+    overlay.classList.remove('anchored-drawer');
+    overlay.style.paddingLeft = '';
+  }
+  overlay.classList.add('show');
+  // 滚动加载状态：当前项目/类型 / 已加载条数 / 是否还有更多（挂在列表元素上，关闭弹窗即失效）
+  const list = document.getElementById('agentHistoryList');
+  list.dataset.projectId = projectId;
+  list.dataset.agentType = agentType;
+  list.dataset.offset = '0';
+  list.dataset.hasMore = 'true';
+  list.innerHTML = '';
+  await loadMoreAgentHistory(projectId, agentType);
+}
+// 追加加载一页（20 条）；滚动到底部由 agentHistoryList 的 scroll 监听触发。
+// 全部失败时清空列表弹 toast；成功不提示（列表内容即反馈）。
+async function loadMoreAgentHistory(projectId, agentType) {
+  const list = document.getElementById('agentHistoryList');
+  const offset = parseInt(list.dataset.offset, 10) || 0;
+  try {
+    const resp = await fetch(`/api/projects/${projectId}/${agentType}-history?offset=${offset}&limit=20`);
+    const data = await resp.json();
+    if (!data.ok) {
+      list.innerHTML = '';
+      list.dataset.hasMore = 'false';
+      showToast(data.msg || '加载历史会话失败', 'error');
+      return;
+    }
+    list.dataset.offset = String(offset + data.sessions.length);
+    list.dataset.hasMore = String(data.hasMore);
+    const loading = document.getElementById('agentHistoryLoading');
+    if (loading) loading.remove();
+    if (offset === 0 && !data.sessions.length) {
+      list.innerHTML = '<div class="claude-history-time" style="padding:8px 2px;">暂无历史会话</div>';
+      return;
+    }
+    data.sessions.forEach((s) => list.insertAdjacentHTML('beforeend', agentHistoryItemHtml(projectId, agentType, s)));
+    if (data.hasMore) {
+      list.insertAdjacentHTML('beforeend', '<div class="claude-history-loading" id="agentHistoryLoading">加载中...</div>');
+    }
+  } catch (e) {
+    list.innerHTML = '';
+    list.dataset.hasMore = 'false';
+    showToast('加载历史会话失败: ' + e.message, 'error');
+  }
+}
+// 单条会话行：摘要 + 时间行（相对时间 + 上下文徽标，按大小分档 s/m/l 配色同项目类型 badge）
+function agentHistoryItemHtml(projectId, agentType, s) {
+  const ctx = s.contextTokens ? `<span class="ctx-badge ${s.contextTokens < 20000 ? 's' : s.contextTokens < 80000 ? 'm' : 'l'}">上下文 ${fmtContextTokens(s.contextTokens)}</span>` : '';
+  return `
+    <div class="claude-history-item agent-history-item" data-sid="${escapeHtml(s.sessionId)}" onclick="resumeHistorySession('${projectId}','${agentType}','${escapeHtml(s.sessionId)}')">
+      <div class="claude-history-summary">${escapeHtml(s.summary || '(无摘要)')}</div>
+      <div class="claude-history-time"><span>${escapeHtml(fmtClaudeHistoryTime(s.timestamp))}</span>${ctx}</div>
+    </div>`;
+}
+// 历史会话时间：5 天内「相对时间 · 日期 时间」（如 3 小时前 · 09-01 14:30），
+// 超过 5 天相对时间失去直观感，直接显示「日期 时间」；输入为 ISO 字符串（后端 mtime）
+function fmtClaudeHistoryTime(iso) {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return '';
+  const diff = (Date.now() - at) / 1000;
+  let rel = '';
+  if (diff < 60) rel = '刚刚';
+  else if (diff < 3600) rel = Math.floor(diff / 60) + ' 分钟前';
+  else if (diff < 86400) rel = Math.floor(diff / 3600) + ' 小时前';
+  else if (diff < 86400 * 5) rel = Math.floor(diff / 86400) + ' 天前';
+  const d = new Date(at);
+  const abs = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return rel ? `${rel} · ${abs}` : abs;
+}
+// 上下文大小展示：<1000 原样，≥1000 取 k（65381 → 65k），四舍五入
+function fmtContextTokens(n) {
+  if (n < 1000) return String(n);
+  return Math.round(n / 1000) + 'k';
+}
+// 恢复历史会话：按类型 POST 到对应 -sessions 路由，后端把 resume id 映射为
+// 各 CLI 的启动参数（claude --resume / codex resume / pi --session）。
+async function resumeHistorySession(projectId, agentType, resumeId) {
+  closeAgentHistoryModal();
+  const resp = await fetch(`/api/projects/${projectId}/${agentType}-sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resume: resumeId }),
+  });
+  const data = await resp.json();
+  if (!data.ok) { showToast(data.msg || '打开历史会话失败', 'error'); return; }
+  // create 广播到达后由 displaySession 自动放入分栏；成功不弹 toast（状态刷新即反馈）
+  renderList();
+}
+function closeAgentHistoryModal() {
+  document.getElementById('agentHistoryOverlay').classList.remove('show');
+}
+// 列表滚动到底部（距底 <40px）且还有更多时，追加加载下一页（20 条）。
+// 监听只绑一次；openAgentHistoryModal 每次打开重置 dataset，天然防重复加载。
+(function () {
+  const list = document.getElementById('agentHistoryList');
+  if (!list.dataset.scrollBound) {
+    list.dataset.scrollBound = '1';
+    list.addEventListener('scroll', () => {
+      if (list.dataset.hasMore !== 'true' || list.dataset.loading === '1') return;
+      if (list.scrollTop + list.clientHeight < list.scrollHeight - 40) return;
+      const { projectId, agentType } = list.dataset;
+      if (!projectId || !agentType) return;
+      list.dataset.loading = '1';
+      loadMoreAgentHistory(projectId, agentType).finally(() => { list.dataset.loading = '0'; });
+    });
+  }
+})();
 
 // ---------- 设置（终端/日志字体 + 命令 + 文件黑名单） ----------
 // 全部配置统一持久化到服务端 settings.json（GET/PUT /api/settings），不再写 localStorage。
@@ -3409,16 +3686,16 @@ let drawerDragging = null;
   resizer.addEventListener('pointercancel', endDrag);
 })();
 
-// ---------- 抽屉面板开关（项目/文件/Git 三选一） ----------
-// SIDE_DRAWER_PANEL: 'project' | 'file' | 'git'；null = 抽屉收起。
-// 持久化：面板选择存 sideDrawerPanel；三面板互斥显示，点未激活按钮切换面板，
+// ---------- 抽屉面板开关（项目/文件/Git/定时任务 四选一） ----------
+// SIDE_DRAWER_PANEL: 'project' | 'file' | 'git' | 'cron'；null = 抽屉收起。
+// 持久化：面板选择存 sideDrawerPanel；四面板互斥显示，点未激活按钮切换面板，
 // 再点激活按钮收起整个抽屉；固定停靠，点外部不收起。
 const SIDE_DRAWER_PANEL_KEY = 'sideDrawerPanel';
 let sideDrawerPanel = null;
 // 恢复上次的面板选择（仅记忆面板，不自动展开抽屉——开态由各面板自身恢复逻辑决定）
 (function restoreSideDrawerPanel() {
   const v = localStorage.getItem(SIDE_DRAWER_PANEL_KEY);
-  sideDrawerPanel = (v === 'project' || v === 'file' || v === 'git') ? v : null;
+  sideDrawerPanel = (v === 'project' || v === 'file' || v === 'git' || v === 'task' || v === 'cron') ? v : null;
 })();
 
 // ---------- 文件/Git 抽屉共享项目指针 ----------
@@ -3448,15 +3725,17 @@ function applySideDrawerState() {
   const drawer = document.getElementById('sideDrawer');
   const main = document.querySelector('.main');
   if (!drawer || !main) return;
-  // 抽屉开态：有激活面板即展开；三面板互斥显示
+  // 抽屉开态：有激活面板即展开；五面板互斥显示
   const open = !!sideDrawerPanel;
   drawer.classList.toggle('open', open);
   main.classList.toggle('drawer-closed', !open);
   document.getElementById('panelProject').style.display = sideDrawerPanel === 'project' ? 'flex' : 'none';
   document.getElementById('panelFile').style.display = sideDrawerPanel === 'file' ? 'flex' : 'none';
   document.getElementById('panelGit').style.display = sideDrawerPanel === 'git' ? 'flex' : 'none';
+  document.getElementById('panelTask').style.display = sideDrawerPanel === 'task' ? 'flex' : 'none';
+  document.getElementById('panelCron').style.display = sideDrawerPanel === 'cron' ? 'flex' : 'none';
   drawer.style.width = drawerWidth + 'px';
-  // 活动栏图标高亮跟随面板开态
+  // 活动栏图标高亮跟随面板开态（任务/定时任务按钮高亮归属工作台态，见 applyWorkbenchState）
   const map = { project: 'activityProjectBtn', file: 'activityFileBtn', git: 'activityGitBtn' };
   for (const [key, id] of Object.entries(map)) {
     const btn = document.getElementById(id);
@@ -3466,6 +3745,8 @@ function applySideDrawerState() {
 }
 // 统一面板开关：切到目标面板（已激活则收起整个抽屉）
 function toggleSidePanel(panel) {
+  // 分隔线上方按钮：若处于工作台模式，先切回终端区再执行原有逻辑
+  if (panel !== 'task' && panel !== 'cron') exitWorkbench();
   sideDrawerPanel = sideDrawerPanel === panel ? null : panel;
   if (sideDrawerPanel) localStorage.setItem(SIDE_DRAWER_PANEL_KEY, sideDrawerPanel);
   else localStorage.removeItem(SIDE_DRAWER_PANEL_KEY);
@@ -3479,6 +3760,71 @@ function toggleSidePanel(panel) {
     openGitDrawer();
   }
 }
+
+// ---------- 任务 / 定时任务工作台 ----------
+// 工作台 = 覆盖层 #workbench 盖住整个终端区（分栏 + 日志抽屉），终端会话不销毁。
+// 任务与定时任务共用同一个工作台（同终端分栏区被项目/文件/Git 共用），workbench 键
+// 持久化当前功能：'task' | 'cron'，缺省 = 工作台关。与抽屉面板（sideDrawerPanel）独立：
+// 点对应按钮展开抽屉 + 进工作台；再点仅收抽屉（工作台保持）；上方按钮统一先退出工作台。
+const WORKBENCH_KEY = 'workbench';
+let workbenchMode = localStorage.getItem(WORKBENCH_KEY) === 'cron' ? 'cron' : null;
+// 旧版只存 cronWorkbench='1'（当时仅定时任务一个功能），迁移为 cron 模式
+(function migrateWorkbenchKey() {
+  if (!workbenchMode && localStorage.getItem('cronWorkbench') === '1') {
+    workbenchMode = 'cron';
+    localStorage.setItem(WORKBENCH_KEY, 'cron');
+  }
+  localStorage.removeItem('cronWorkbench');
+})();
+function applyWorkbenchState() {
+  const el = document.getElementById('workbench');
+  if (!el) return;
+  el.classList.toggle('show', !!workbenchMode);
+  // 高亮跟随工作台当前功能（指示终端区显示的是哪个工作台），与面板开态无关
+  const taskBtn = document.getElementById('activityTaskBtn');
+  if (taskBtn) taskBtn.classList.toggle('active', workbenchMode === 'task');
+  const cronBtn = document.getElementById('activityCronBtn');
+  if (cronBtn) cronBtn.classList.toggle('active', workbenchMode === 'cron');
+  if (workbenchMode) scheduleFitAndResize();
+  else fitAfterDrawer();
+}
+function enterWorkbench(mode) {
+  if (workbenchMode === mode) return;
+  workbenchMode = mode;
+  localStorage.setItem(WORKBENCH_KEY, mode);
+  applyWorkbenchState();
+}
+function exitWorkbench() {
+  if (!workbenchMode) return;
+  workbenchMode = null;
+  localStorage.removeItem(WORKBENCH_KEY);
+  applyWorkbenchState();
+}
+// 活动栏任务/定时任务按钮共用开关逻辑：
+//   抽屉未开本功能面板 → 展开抽屉 + 进本功能工作台（工作台已开则仅切换功能，不闪断）；
+//   抽屉已开本功能面板 → 仅收抽屉，工作台保持（与上方按钮"再点收抽屉"一致）；
+//   抽屉收着但工作台开着 → 重新展开抽屉。
+function toggleWorkbenchBtn(mode) {
+  if (sideDrawerPanel === mode) {
+    closeWorkbenchDrawer(mode);
+    return;
+  }
+  sideDrawerPanel = mode;
+  localStorage.setItem(SIDE_DRAWER_PANEL_KEY, mode);
+  applySideDrawerState();
+  enterWorkbench(mode);
+}
+function toggleTaskWorkbench() { toggleWorkbenchBtn('task'); }
+function toggleCronWorkbench() { toggleWorkbenchBtn('cron'); }
+// 任务/定时任务面板关闭按钮：只收抽屉，不影响工作台态
+function closeWorkbenchDrawer(mode) {
+  if (sideDrawerPanel !== mode) { applySideDrawerState(); return; }
+  sideDrawerPanel = null;
+  localStorage.removeItem(SIDE_DRAWER_PANEL_KEY);
+  applySideDrawerState();
+}
+function closeTaskDrawer() { closeWorkbenchDrawer('task'); }
+function closeCronDrawer() { closeWorkbenchDrawer('cron'); }
 
 // ---------- 日志抽屉折叠/调高 ----------
 // 折叠态 + 展开高度均持久化到 localStorage；默认收起。
@@ -3768,6 +4114,7 @@ function openFileDrawer(projectId) {
   //   从没打开过 → 空白占位。
   // 带参调用（项目卡片文件夹按钮/激活联动）：绑定该项目。
   // 每个项目独立保留展开层级 + 选中态（fileDrawerStateByProject 状态桶）。
+  exitWorkbench(); // 项目卡片入口：与上方按钮一致，先切回终端区再打开抽屉
   if (!projectId) {
     const act = activePane();
     if (act && act.projectId) projectId = act.projectId;
@@ -4285,6 +4632,7 @@ function applyGitDrawerState() {
 function openGitDrawer(projectId) {
   // 带参（项目卡片 Git 按钮）：绑定该项目；无参（活动栏）：跟随当前终端激活栏项目
   //（空白栏/无项目时回退共享指针——文件/Git 两抽屉共用的「前次项目」，可能由任一抽屉写入）
+  exitWorkbench(); // 项目卡片入口：与上方按钮一致，先切回终端区再打开抽屉
   if (!projectId) {
     const act = activePane();
     if (act && act.projectId) projectId = act.projectId;
@@ -6675,7 +7023,10 @@ function hideFileViewWindow() {
 function toggleFileViewWindow() {
   const overlay = document.getElementById('fileViewOverlay');
   if (overlay.classList.contains('show')) hideFileViewWindow();
-  else showFileViewWindow();
+  else {
+    exitWorkbench(); // 与上方按钮一致：先切回终端区再唤出编辑器窗口
+    showFileViewWindow();
+  }
 }
 
 // 活动栏「文件编辑」按钮：只有打开过文件（有 tab）才显示；窗口可见时高亮
@@ -7446,6 +7797,45 @@ bootSettings();
 // 统一推迟到 loadProjects 项目就绪后（见 loadProjects 末尾）——提前打开会因 projects=[]
 // 把已持久化的项目绑定误判为"项目已删除"而清空，导致刷新后文件/Git 面板空白。
 applySideDrawerState();
+applyWorkbenchState(); // 还原工作台态（刷新后保持任务/定时任务模式）
+// 自绘标题栏：浏览器/壳内都显示品牌区；窗口控制按钮（.tb-btns）仅 Tauri 壳内
+// （window.__TAURI__ 注入）激活——加 .tauri class 后才显示，浏览器没有窗口可操作。
+// 版本号从后端取（与 package.json 单一来源）。
+(function initTitlebar() {
+  const tauri = window.__TAURI__;
+  const win = tauri && tauri.window ? tauri.window.getCurrentWindow() : null;
+  const bar = document.getElementById('titlebar');
+  if (!bar) return;
+  if (!win) {
+    // 浏览器直开：仍拉版本号，只是不显示窗口按钮
+    fetch('/api/version').then(r => r.json()).then(d => {
+      if (d && d.version) document.getElementById('tbVersion').textContent = 'v' + d.version;
+    }).catch(() => { /* 版本号取不到就不显示 */ });
+    return;
+  }
+  bar.classList.add('tauri');
+
+  document.getElementById('tbMin').addEventListener('click', () => win.minimize());
+  document.getElementById('tbMax').addEventListener('click', () => win.toggleMaximize());
+  document.getElementById('tbClose').addEventListener('click', () => win.close());
+
+  // 最大化/还原时切换图标（方块 ⇄ 双方块）
+  const maxSvg = '<rect x="5" y="5" width="14" height="14" rx="1"/>';
+  const restoreSvg = '<path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3"/><rect x="4" y="8" width="12" height="12" rx="1"/>';
+  async function syncMaxIcon() {
+    try {
+      document.getElementById('tbMax').innerHTML =
+        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${(await win.isMaximized()) ? restoreSvg : maxSvg}</svg>`;
+    } catch (_) { /* API 不可用时保持原样 */ }
+  }
+  syncMaxIcon();
+  window.addEventListener('resize', syncMaxIcon);
+
+  fetch('/api/version').then(r => r.json()).then(d => {
+    if (d && d.version) document.getElementById('tbVersion').textContent = 'v' + d.version;
+  }).catch(() => { /* 版本号取不到就不显示 */ });
+})();
+
 // 初始分栏：优先恢复持久化的布局（栏数 + 每栏项目视图 + 激活栏），无则单栏空白。
 // 会话视图在 loadProjects 内经 reconnectSessionPanes 按服务端存活状态重连或回退空白。
 restorePaneLayout();
@@ -7501,6 +7891,27 @@ loadProjects();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideGitContextMenu(); });
   window.addEventListener('blur', hideGitContextMenu);
 })();
+
+// agent 按钮（claude/codex/pi）右键菜单：同 Git 菜单模式（mousedown 执行 + 点别处/ESC/失焦关闭）
+(function () {
+  const menu = document.getElementById('agentBtnContextMenu');
+  menu.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); execAgentBtnContextAction(b.dataset.act); });
+  });
+  document.addEventListener('click', hideAgentBtnContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('#agentBtnContextMenu') && !e.target.closest('.term-new-row button[data-agent-type]')) hideAgentBtnContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideAgentBtnContextMenu(); });
+  window.addEventListener('blur', hideAgentBtnContextMenu);
+})();
+async function execAgentBtnContextAction(act) {
+  const menu = document.getElementById('agentBtnContextMenu');
+  const { projectId, agentType } = menu.dataset;
+  hideAgentBtnContextMenu();
+  if (act !== 'history' || !projectId || !agentType) return;
+  openAgentHistoryModal(projectId, agentType);
+}
 
 // 全局拦截浏览器原生右键菜单：页面所有右键交互走自绘菜单（分栏 tab/文件树/Git 历史），
 // 其余区域右键不应弹出浏览器默认菜单（WebView2 下显示浏览器 chrome 菜单，与面板风格不符）

@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const http = require('http');
 const { spawn, exec, execSync, execFile, spawnSync } = require('child_process');
 const express = require('express');
@@ -51,6 +52,23 @@ const SETTINGS_FILE = process.env.SETTINGS_FILE
 const PUBLIC_DIR = process.env.PUBLIC_DIR
   ? path.resolve(process.env.PUBLIC_DIR)
   : path.join(ROOT_DIR, 'public');
+// Claude Code 历史会话根目录（~/.claude/projects），测试可指向临时目录隔离。
+// 目录编码规则与 Claude Code 一致：绝对路径中非 [a-zA-Z0-9-] 全部替换为 '-'。
+const CLAUDE_PROJECTS_DIR = process.env.CLAUDE_PROJECTS_DIR
+  ? path.resolve(process.env.CLAUDE_PROJECTS_DIR)
+  : path.join(os.homedir(), '.claude', 'projects');
+// Codex 历史会话根目录（~/.codex/sessions，按 YYYY/MM/DD 分层存放 rollout-*.jsonl）。
+// pi 历史会话根目录（~/.pi/agent/sessions，下按编码后的项目路径分目录）。测试可覆盖隔离。
+const CODEX_SESSIONS_DIR = process.env.CODEX_SESSIONS_DIR
+  ? path.resolve(process.env.CODEX_SESSIONS_DIR)
+  : path.join(os.homedir(), '.codex', 'sessions');
+const PI_SESSIONS_DIR = process.env.PI_SESSIONS_DIR
+  ? path.resolve(process.env.PI_SESSIONS_DIR)
+  : path.join(os.homedir(), '.pi', 'agent', 'sessions');
+// 编码函数作为 createTerminalSession 同级工具，历史会话查询与 CLI 目录名共用一套规则。
+function encodeClaudeProjectDir(p) {
+  return p.replace(/[^a-zA-Z0-9-]/g, '-');
+}
 
 // 终端会话 spawn 的命令/参数/消息类型，按类型区分 claude 与 codex。
 // 默认 `claude` / `codex`；可用 CLAUDE_BIN/CLAUDE_ARGS、CODEX_BIN/CODEX_ARGS 覆盖
@@ -615,8 +633,16 @@ function sanitizeTerminalEnv(baseEnv) {
   return out;
 }
 
-// 创建一个终端会话（claude / codex）：spawn 真 PTY，cwd = 宿主项目 projectPath。
-function createTerminalSession(projectId, type) {
+// 创建一个终端会话（claude / codex / pi 等）：spawn 真 PTY，cwd = 宿主项目 projectPath。
+// opts.resume：历史会话 id，按 CLI 各自的恢复方式追加启动参数：
+//   claude `--resume <id>`；codex `resume <id>`（子命令）；pi `--session <id>`
+//   （pi 的 --resume 是交互选择器，不能指定会话）。
+const RESUME_ARGS = {
+  claude: (id) => ['--resume', id],
+  codex: (id) => ['resume', id],
+  pi: (id) => ['--session', id],
+};
+function createTerminalSession(projectId, type, opts = {}) {
   const cfg = TERMINAL_TYPES[type];
   const p = getProject(projectId);
   if (!p) return { ok: false, msg: '项目不存在' };
@@ -628,12 +654,20 @@ function createTerminalSession(projectId, type) {
   const sessionId = newSessionId(type);
   const sessionNumber = allocSessionNumber(projectId, type);
 
+  // resume：在默认/env 覆盖参数之后追加（CLAUDE_ARGS 等会整体覆盖默认参数，
+  // 故必须 append 而非前置），按类型映射为各 CLI 的恢复参数。
+  const args = cfg.args.slice();
+  if (opts.resume) {
+    const mk = RESUME_ARGS[type];
+    if (mk) args.push(...mk(String(opts.resume)));
+  }
+
   let term;
   try {
     // name: 'xterm-256color' 让 CLI 以为自己在 xterm，TUI 色彩/光标序列完整。
     // cwd 取宿主 projectPath；env 继承当前进程但剔除 IDE 注入变量（sanitizeTerminalEnv），
     // 使 claude/codex 子进程环境与"cmd 直接启动"一致（登录态、PATH 等照常继承）。
-    term = pty.spawn(cfg.binResolved, cfg.args, {
+    term = pty.spawn(cfg.binResolved, args, {
       name: 'xterm-256color',
       cwd: p.projectPath,
       env: sanitizeTerminalEnv(process.env),
@@ -848,6 +882,15 @@ app.get('/about.md', (req, res) => {
     } catch (_) { /* package.json 读取失败则原样返回 ABOUT.md */ }
     res.type('text/markdown; charset=utf-8').send(text);
   });
+});
+
+// 版本号：供壳标题栏显示（与 package.json 单一来源，避免多处硬编码不同步）。
+app.get('/api/version', (req, res) => {
+  try {
+    res.json({ version: require(path.join(ROOT_DIR, 'package.json')).version || '' });
+  } catch (_) {
+    res.json({ version: '' });
+  }
 });
 
 // 文件夹选取：调 PowerShell 弹 Windows 标准「选择文件夹」对话框（FolderBrowserDialog）。
@@ -2467,6 +2510,211 @@ app.get('/api/projects/:id/svn/diff', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Claude 历史会话:读取 ~/.claude/projects/<编码路径>/*.jsonl 的外部会话记录。
+// 每行一个 JSON:meta/caveat 行(type!=user 或 isMeta)跳过,取首条真实用户消息作摘要;
+// 上下文大小取文件内 assistant usage(input+cache_read+cache_creation)的最大值;
+// 文件 mtime 即最后活动时间;按 mtime 倒序取前 20 个,供前端弹窗点选后 --resume 恢复。
+// ---------------------------------------------------------------------------
+function listClaudeHistory(projectPath) {
+  const dir = path.join(CLAUDE_PROJECTS_DIR, encodeClaudeProjectDir(projectPath));
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch (e) {
+    return []; // 目录不存在 = 该项目从未在本机开过 claude,空列表即可
+  }
+  const sessions = [];
+  for (const f of files) {
+    if (!f.endsWith('.jsonl')) continue;
+    const sessionId = f.slice(0, -'.jsonl'.length);
+    let summary = '';
+    let timestamp = null;
+    let contextTokens = null;
+    try {
+      // 逐行扫:摘要取到首条真实用户消息即停;usage 持续跟踪取最大(上下文只增不减,
+      // 最后一轮即最大,但 auto-compact 后会回落——取历史最大即"本会话上下文峰值")。
+      const lines = fs.readFileSync(path.join(dir, f), 'utf-8').split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let obj;
+        try { obj = JSON.parse(line); } catch (e) { continue; }
+        const u = obj.message && obj.message.usage;
+        if (u) {
+          const total = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+          if (total > 0 && total > (contextTokens || 0)) contextTokens = total;
+        }
+        if (summary) continue; // 摘要已取到,只剩 usage 跟踪
+        if (obj.type !== 'user' || obj.isMeta) continue;
+        const c = obj.message && obj.message.content;
+        // content 可能是字符串,也可能是分块数组(取首个 text 块)
+        let text = '';
+        if (typeof c === 'string') text = c;
+        else if (Array.isArray(c)) {
+          const t = c.find((b) => b && b.type === 'text');
+          if (t) text = t.text || '';
+        }
+        text = (text || '').trim();
+        if (!text) continue;
+        summary = text.length > 80 ? text.slice(0, 80) + '…' : text;
+      }
+      timestamp = fs.statSync(path.join(dir, f)).mtime.toISOString();
+    } catch (e) {
+      continue; // 单个文件读失败跳过,不影响其余会话
+    }
+    sessions.push({ sessionId, summary, timestamp, contextTokens });
+  }
+  sessions.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  return sessions; // 截断交给路由层按 offset/limit 分页
+}
+
+// ---------------------------------------------------------------------------
+// Codex 历史会话:读取 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl。
+// 首行 session_meta.payload.cwd 标记项目(与 claude 不同,codex 目录名是日期不含
+// 项目路径,项目归属只能看 cwd 字段);摘要取首条真实用户消息(response_item 中
+// role=user 的 message,跳过 role=developer 的注入指令与 AGENTS.md 内容);
+// 上下文取 event_msg token_count.last_token_usage(input+cached+cache_write)峰值;
+// mtime = 最后活动时间;输出结构与 listClaudeHistory 一致。
+// ---------------------------------------------------------------------------
+function listCodexHistory(projectPath) {
+  const wanted = path.resolve(projectPath).toLowerCase();
+  const sessions = [];
+  // 日期分层目录,直接递归三层取 rollout-*.jsonl(目录不存在 = 从未开过 codex)
+  const root = CODEX_SESSIONS_DIR;
+  let yearDirs;
+  try { yearDirs = fs.readdirSync(root); } catch (e) { return []; }
+  for (const y of yearDirs) {
+    if (!/^\d{4}$/.test(y)) continue;
+    let monthDirs;
+    try { monthDirs = fs.readdirSync(path.join(root, y)); } catch (e) { continue; }
+    for (const m of monthDirs) {
+      if (!/^\d{1,2}$/.test(m)) continue;
+      let dayDirs;
+      try { dayDirs = fs.readdirSync(path.join(root, y, m)); } catch (e) { continue; }
+      for (const d of dayDirs) {
+        if (!/^\d{1,2}$/.test(d)) continue;
+        const dayDir = path.join(root, y, m, d);
+        let files;
+        try { files = fs.readdirSync(dayDir); } catch (e) { continue; }
+        for (const f of files) {
+          if (!f.endsWith('.jsonl')) continue;
+          let rec = null;
+          try { rec = readCodexSessionFile(path.join(dayDir, f), wanted); } catch (e) {}
+          if (rec) sessions.push(rec);
+        }
+      }
+    }
+  }
+  sessions.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  return sessions;
+}
+
+function readCodexSessionFile(file, wantedLower) {
+  const lines = fs.readFileSync(file, 'utf-8').split('\n');
+  let cwd = null;
+  let sessionId = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch (e) { continue; }
+    if (obj.type === 'session_meta') {
+      cwd = obj.payload && obj.payload.cwd;
+      sessionId = (obj.payload && (obj.payload.session_id || obj.payload.id)) || path.basename(file, '.jsonl');
+      break;
+    }
+  }
+  if (!cwd || path.resolve(cwd).toLowerCase() !== wantedLower) return null; // 项目不符
+  let summary = '';
+  let contextTokens = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch (e) { continue; }
+    if (obj.type === 'event_msg' && obj.payload && obj.payload.type === 'token_count') {
+      const u = obj.payload.info && obj.payload.info.last_token_usage;
+      if (u) {
+        const total = (u.input_tokens || 0) + (u.cached_input_tokens || 0) + (u.cache_write_input_tokens || 0);
+        if (total > 0 && total > (contextTokens || 0)) contextTokens = total;
+      }
+      continue;
+    }
+    if (summary || obj.type !== 'response_item') continue;
+    const pl = obj.payload || {};
+    if (pl.type !== 'message' || pl.role !== 'user') continue;
+    const blocks = Array.isArray(pl.content) ? pl.content : [];
+    const t = blocks.find((b) => b && b.type === 'input_text');
+    let text = (t && t.text || '').trim();
+    // 跳过系统注入:developer 角色/AGENTS.md/skills 等指令块(用户消息前常被注入)
+    if (!text || /^<skills_instructions>|^# AGENTS\.md|^<INSTRUCTIONS>|^<environment_context>/.test(text)) continue;
+    summary = text.length > 80 ? text.slice(0, 80) + '…' : text;
+  }
+  return { sessionId, summary, timestamp: fs.statSync(file).mtime.toISOString(), contextTokens };
+}
+
+// ---------------------------------------------------------------------------
+// pi 历史会话:读取 ~/.pi/agent/sessions/<编码目录>/*.jsonl。
+// 首行 {"type":"session","cwd":...} 标记项目;摘要取首条 user message;
+// 上下文取 assistant 行 usage.totalTokens 峰值;mtime = 最后活动时间。
+// ---------------------------------------------------------------------------
+function listPiHistory(projectPath) {
+  const wanted = path.resolve(projectPath).toLowerCase();
+  const root = PI_SESSIONS_DIR;
+  let dirs;
+  try { dirs = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return []; }
+  const sessions = [];
+  for (const ent of dirs) {
+    if (!ent.isDirectory()) continue;
+    const sub = path.join(root, ent.name);
+    let files;
+    try { files = fs.readdirSync(sub); } catch (e) { continue; }
+    for (const f of files) {
+      if (!f.endsWith('.jsonl')) continue;
+      let rec = null;
+      try { rec = readPiSessionFile(path.join(sub, f), wanted); } catch (e) {}
+      if (rec) sessions.push(rec);
+    }
+  }
+  sessions.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  return sessions;
+}
+
+function readPiSessionFile(file, wantedLower) {
+  const lines = fs.readFileSync(file, 'utf-8').split('\n');
+  let cwd = null;
+  let sessionId = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch (e) { continue; }
+    if (obj.type === 'session') {
+      cwd = obj.cwd;
+      sessionId = obj.id || path.basename(file, '.jsonl');
+      break;
+    }
+  }
+  if (!cwd || path.resolve(cwd).toLowerCase() !== wantedLower) return null;
+  let summary = '';
+  let contextTokens = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch (e) { continue; }
+    const msg = obj.message;
+    if (msg && msg.role === 'assistant' && msg.usage) {
+      const total = msg.usage.totalTokens || 0;
+      if (total > 0 && total > (contextTokens || 0)) contextTokens = total;
+      continue;
+    }
+    if (summary || obj.type !== 'message' || !msg || msg.role !== 'user') continue;
+    const blocks = Array.isArray(msg.content) ? msg.content : [];
+    const t = blocks.find((b) => b && b.type === 'text');
+    const text = ((t && t.text) || '').trim();
+    if (!text) continue;
+    summary = text.length > 80 ? text.slice(0, 80) + '…' : text;
+  }
+  return { sessionId, summary, timestamp: fs.statSync(file).mtime.toISOString(), contextTokens };
+}
+
+// ---------------------------------------------------------------------------
 // 终端会话 REST API(claude / codex;会话仅运行时内存,不落盘)
 // 两类型路由平行:/api/projects/:id/claude-sessions 与 .../codex-sessions,
 // 同一套 handler 按类型参数化注册;sessionId 前缀已含类型,其余逻辑共用。
@@ -2488,12 +2736,27 @@ for (const type of ['claude', 'codex', 'cmd', 'gitbash', 'pi']) {
     res.json({ ok: true, sessions: list });
   });
 
-  // 创建终端会话:cwd = 宿主项目 projectPath
+  // 创建终端会话:cwd = 宿主项目 projectPath;body.resume 可选(claude 历史会话恢复)
   app.post(base, (req, res) => {
-    const result = createTerminalSession(req.params.id, type);
+    const result = createTerminalSession(req.params.id, type, { resume: req.body && req.body.resume });
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   });
+
+  // 历史会话列表:读各 CLI 本地的会话文件,弹窗点选后按各自方式恢复会话。
+  // 支持 offset/limit 分页(前端滚动加载):limit 缺省 20,回包带 hasMore 供判断是否继续加载。
+  const HISTORY_LISTERS = { claude: listClaudeHistory, codex: listCodexHistory, pi: listPiHistory };
+  if (HISTORY_LISTERS[type]) {
+    app.get(`/api/projects/:id/${type}-history`, (req, res) => {
+      const p = getProject(req.params.id);
+      if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+      const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+      const all = HISTORY_LISTERS[type](p.projectPath);
+      const sessions = all.slice(offset, offset + limit);
+      res.json({ ok: true, sessions, hasMore: offset + sessions.length < all.length });
+    });
+  }
 
   // 关闭单个终端会话:递归 taskkill /T 杀进程树并移除菜单项
   app.delete(`${base}/:sessionId`, (req, res) => {

@@ -164,6 +164,10 @@ pub fn main() {
                 tauri::WebviewUrl::External(url.parse().unwrap()),
             )
             .title(format!("多元任务面板 v{}", app.config().version.as_deref().unwrap_or("0.0.0")))
+            // 无边框：系统标题栏去掉，由前端自绘标题栏（logo/名称/版本 + 最小化/最大化/关闭，
+            // 拖动走 data-tauri-drag-region）。标题仍保留（任务栏/Alt+Tab 显示用）。
+            .decorations(false)
+            .shadow(true)
             .inner_size(1100.0, 680.0)
             .min_inner_size(800.0, 500.0)
             .build()?;

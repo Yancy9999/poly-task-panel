@@ -25,6 +25,8 @@ const ideKeys = Object.keys(process.env).filter(
 process.stderr.write(`[fake-codex] env-ide-keys=${JSON.stringify(ideKeys)}\n`);
 process.stderr.write(`[fake-codex] env-keep-var=${process.env.TEST_KEEP_VAR || ''}\n`);
 process.stderr.write(`[fake-codex] env-has-path=${process.env.PATH ? 'yes' : 'no'}\n`);
+// 报告自身完整 argv：供契约测试断言 server spawn 时的参数透传链路（如 resume 子命令）。
+process.stderr.write(`[fake-codex] argv=${JSON.stringify(process.argv)}\n`);
 
 // 关键：ConPTY 下 node 的 TTY stdin 在默认 cooked 模式不会触发 'data' 事件。
 // 真正的交互式 TUI（含真 codex CLI）都会把终端设为 raw 模式读键；
