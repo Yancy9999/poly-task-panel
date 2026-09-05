@@ -143,3 +143,39 @@ test('PUT 后 /files 默认黑名单联动：fileHideList=node_modules 时 .git 
   assert.ok(names.includes('.git'), '新黑名单不含 .git，应显示');
   assert.ok(names.includes('.gitignore'), '.gitignore 应显示');
 });
+
+// --- projectCollapsed（项目卡片折叠状态，服务端持久化）---
+
+test('GET：无 settings.json 时 projectCollapsed 默认空对象', async () => {
+  // 注意：此测试文件按声明顺序执行，前面的 PUT 已落盘 settings.json；
+  // 这里只断言字段存在且为对象（形态兜底），默认空对象的纯场景由单独文件级验证覆盖。
+  const r = await get('/api/settings');
+  assert.strictEqual(r.status, 200);
+  const s = r.body.settings;
+  assert.ok(typeof s.projectCollapsed === 'object' && s.projectCollapsed !== null && !Array.isArray(s.projectCollapsed),
+    'projectCollapsed 是对象');
+});
+
+test('PUT：折叠 map 落盘，GET 回读一致；非法值归一为空对象', async () => {
+  const putRes = await put({ projectCollapsed: { p1: 1, p2: 1, bad: 'x', 3: 1 } });
+  assert.strictEqual(putRes.status, 200);
+  const s = putRes.body.settings;
+  // 归一：值归一为 1（仅保留字符串 key 的真值条目），非法条目剔除
+  assert.deepStrictEqual(s.projectCollapsed, { p1: 1, p2: 1, bad: 1, 3: 1 });
+
+  const r = await get('/api/settings');
+  assert.deepStrictEqual(r.body.settings.projectCollapsed, s.projectCollapsed, '回读一致');
+
+  // 落盘
+  const onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.deepStrictEqual(onDisk.projectCollapsed, s.projectCollapsed);
+
+  // 非法输入：数组/标量/null → 空对象
+  for (const bad of [[1, 2], 'x', 42, null]) {
+    const rr = await put({ projectCollapsed: bad });
+    assert.deepStrictEqual(rr.body.settings.projectCollapsed, {}, `非法值 ${JSON.stringify(bad)} → 空对象`);
+  }
+  // 非法条目剔除：值 0/''/null 等视为未折叠
+  const rr2 = await put({ projectCollapsed: { keep: 1, drop0: 0, dropStr: '', dropNull: null } });
+  assert.deepStrictEqual(rr2.body.settings.projectCollapsed, { keep: 1 });
+});

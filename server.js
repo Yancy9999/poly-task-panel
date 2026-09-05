@@ -49,6 +49,10 @@ const PROJECTS_FILE = process.env.PROJECTS_FILE
 const SETTINGS_FILE = process.env.SETTINGS_FILE
   ? path.resolve(process.env.SETTINGS_FILE)
   : path.join(ROOT_DIR, 'settings.json');
+// TASKS_FILE 同理：任务看板数据（想法/待执行/任务中/待审核/已完成）持久化文件，测试用临时目录隔离。
+const TASKS_FILE = process.env.TASKS_FILE
+  ? path.resolve(process.env.TASKS_FILE)
+  : path.join(ROOT_DIR, 'tasks.json');
 const PUBLIC_DIR = process.env.PUBLIC_DIR
   ? path.resolve(process.env.PUBLIC_DIR)
   : path.join(ROOT_DIR, 'public');
@@ -202,6 +206,50 @@ function saveProjects(projects) {
 
 let projects = loadProjects();
 
+// ---------------------------------------------------------------------------
+// 持久化：tasks.json（任务看板）
+// ---------------------------------------------------------------------------
+function loadTasks() {
+  try {
+    const raw = fs.readFileSync(TASKS_FILE, 'utf-8');
+    const data = JSON.parse(raw);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('读取 tasks.json 失败:', e.message);
+    return [];
+  }
+}
+
+// claude 会话标题（卡片展示用）：cliSessionId -> { title, mtime } 缓存，mtime 不变直接用缓存。
+// 读会话文件里最后一条 ai-title 行（claude 自动生成的会话标题，--resume 列表同款）。
+// 会话文件在 CLAUDE_PROJECTS_DIR/<编码项目目录>/<sessionId>.jsonl（同 listClaudeHistory 规则），
+// 由调用方传入项目路径定位；ai-title 由 claude 异步补写，无该行返回空（卡片不显示标题）。
+const claudeSessionTitleCache = new Map();
+function claudeSessionTitle(sessionId, projectPath) {
+  const file = path.join(CLAUDE_PROJECTS_DIR, encodeClaudeProjectDir(projectPath), `${sessionId}.jsonl`);
+  let mtime = 0;
+  try { mtime = fs.statSync(file).mtimeMs; } catch (e) { return ''; }
+  const cached = claudeSessionTitleCache.get(sessionId);
+  if (cached && cached.mtime === mtime) return cached.title;
+  let title = '';
+  try {
+    for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch (e) { continue; }
+      if (obj.type === 'ai-title' && obj.aiTitle) title = obj.aiTitle; // 取最后一条
+    }
+  } catch (e) {}
+  claudeSessionTitleCache.set(sessionId, { title, mtime });
+  return title;
+}
+
+function saveTasks(tasks) {
+  fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2), 'utf-8');
+}
+
+let tasks = loadTasks();
+
 // id -> project 的索引，热路径（appendFileChain / flushPendingLogs / clearLogFile /
 // readLogHistory 每条日志都会查）用它 O(1) 取代 projects.find 的 O(n) 线性扫描。
 // 与 projects 数组同步维护：增删/重排/加载处都走 rebuildProjectsIndex。
@@ -243,6 +291,7 @@ const DEFAULT_SETTINGS = {
   agentQuickTexts: null,
   cmdQuickTexts: null,
   fileHideList: DEFAULT_FILE_HIDE_LIST.slice(),
+  projectCollapsed: {},
 };
 // 命令列表归一：[{cmd,desc}]，cmd 非空字符串；空列表/非法结构存 null（读取端回退默认命令集）
 function sanitizeCommandList(list) {
@@ -274,6 +323,16 @@ function sanitizeFileHideList(list) {
   }
   return out.length ? out : DEFAULT_FILE_HIDE_LIST.slice();
 }
+// 项目卡片折叠 map 归一：{ [projectId]: 1 }，只保留真值条目（值统一为 1）；
+// 数组/标量/null 等非法结构一律回空对象
+function sanitizeProjectCollapsed(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (k && typeof k === 'string' && v) out[k] = 1;
+  }
+  return out;
+}
 // 设置对象归一：只挑白名单字段，缺失字段用默认值补齐（前端逐版本加字段时旧文件也能读）
 function normalizeSettings(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -287,6 +346,7 @@ function normalizeSettings(raw) {
     agentQuickTexts: sanitizeQuickTexts(src.agentQuickTexts),
     cmdQuickTexts: sanitizeQuickTexts(src.cmdQuickTexts),
     fileHideList: sanitizeFileHideList(src.fileHideList),
+    projectCollapsed: sanitizeProjectCollapsed(src.projectCollapsed),
   };
 }
 function loadSettings() {
@@ -2782,6 +2842,322 @@ for (const type of ['claude', 'codex', 'cmd', 'gitbash', 'pi']) {
     res.json({ ok: true });
   });
 }
+
+// ---------------------------------------------------------------------------
+// 任务看板：/api/tasks
+// ---------------------------------------------------------------------------
+const TASK_AGENTS = ['claude', 'codex', 'pi'];
+// 看板列（固定顺序，列本身不可拖）：想法 / 待执行 / 任务中 / 待审核 / 已完成
+const TASK_COLUMNS = ['idea', 'todo', 'doing', 'review', 'done'];
+
+function newTaskId() {
+  return 't_' + Math.random().toString(36).slice(2, 10);
+}
+
+app.get('/api/tasks', (req, res) => {
+  // 会话标题随列表带回（不落盘）：claude 有 ai-title 可取；codex/pi 无原生标题不带字段。
+  res.json(tasks.map((t) => {
+    if (t.agent === 'claude' && t.cliSessionId) {
+      const p = getProject(t.projectId);
+      const title = p ? claudeSessionTitle(t.cliSessionId, p.projectPath) : '';
+      return title ? { ...t, sessionTitle: title } : t;
+    }
+    return t;
+  }));
+});
+
+app.post('/api/tasks', (req, res) => {
+  const { projectId, agent, goal, column } = req.body || {};
+  if (!projectId || !agent || !goal || !column) {
+    return res.status(400).json({ ok: false, msg: '缺少必填字段' });
+  }
+  if (!TASK_AGENTS.includes(agent)) {
+    return res.status(400).json({ ok: false, msg: `agent 仅支持：${TASK_AGENTS.join('/')}` });
+  }
+  if (!TASK_COLUMNS.includes(column)) {
+    return res.status(400).json({ ok: false, msg: `列仅支持：${TASK_COLUMNS.join('/')}` });
+  }
+  if (!projects.some((p) => p.id === projectId)) {
+    return res.status(400).json({ ok: false, msg: '项目不存在' });
+  }
+  const task = {
+    id: newTaskId(),
+    projectId,
+    agent,
+    goal,
+    column,
+    createdAt: new Date().toISOString(),
+  };
+  tasks.push(task);
+  saveTasks(tasks);
+  res.json({ ok: true, task });
+});
+
+// 拖动后整表同步：前端提交全量 {id, column} 列表，后端按提交顺序重排并更新列。
+app.post('/api/tasks/sync', (req, res) => {
+  const list = req.body && req.body.tasks;
+  if (!Array.isArray(list)) {
+    return res.status(400).json({ ok: false, msg: '缺少 tasks' });
+  }
+  const ids = list.map((x) => x && x.id);
+  const existingIds = tasks.map((t) => t.id);
+  if (ids.length !== existingIds.length || new Set(ids).size !== ids.length ||
+      !ids.every((id) => existingIds.includes(id))) {
+    return res.status(400).json({ ok: false, msg: 'tasks 与现有任务不一致' });
+  }
+  if (!list.every((x) => TASK_COLUMNS.includes(x.column))) {
+    return res.status(400).json({ ok: false, msg: `列仅支持：${TASK_COLUMNS.join('/')}` });
+  }
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  tasks = list.map((x) => {
+    const t = byId.get(x.id);
+    t.column = x.column;
+    return t;
+  });
+  saveTasks(tasks);
+  res.json({ ok: true });
+});
+
+// 编辑任务（卡片弹窗）：goal 必填非空，projectId/agent 传入时校验合法后更新，column/createdAt 不变。
+app.put('/api/tasks/:id', (req, res) => {
+  const task = tasks.find((t) => t.id === req.params.id);
+  if (!task) {
+    return res.status(404).json({ ok: false, msg: '任务不存在' });
+  }
+  const { projectId, agent, goal } = req.body || {};
+  if (goal !== undefined && (!goal || !String(goal).trim())) {
+    return res.status(400).json({ ok: false, msg: '目标不能为空' });
+  }
+  if (agent !== undefined && !TASK_AGENTS.includes(agent)) {
+    return res.status(400).json({ ok: false, msg: `agent 仅支持：${TASK_AGENTS.join('/')}` });
+  }
+  if (projectId !== undefined && !projects.some((p) => p.id === projectId)) {
+    return res.status(400).json({ ok: false, msg: '项目不存在' });
+  }
+  if (goal !== undefined) task.goal = String(goal).trim();
+  if (agent !== undefined) task.agent = agent;
+  if (projectId !== undefined) task.projectId = projectId;
+  saveTasks(tasks);
+  res.json({ ok: true, task });
+});
+
+// 删除任务（卡片弹窗）。
+app.delete('/api/tasks/:id', (req, res) => {
+  const idx = tasks.findIndex((t) => t.id === req.params.id);
+  if (idx === -1) {
+    return res.status(404).json({ ok: false, msg: '任务不存在' });
+  }
+  tasks.splice(idx, 1);
+  saveTasks(tasks);
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// 任务单轮执行：POST /api/tasks/:id/run
+// 以 print 模式（非交互）spawn 对应 agent CLI，goal 走 stdin，JSONL 流式输出
+// 经解析转文本增量后广播 task-run-output；进程退出即任务结束（exit 0 = 成功）。
+// 完成后再次发起时带上 cliSessionId 续跑原会话（claude --resume / codex exec resume /
+// pi --session）。不占用终端会话（不出现在终端菜单），输出只在任务弹窗回放/实时。
+// ---------------------------------------------------------------------------
+// 各 agent 的单轮执行命令配置：bin/args 可用 TASK_<AGENT>_BIN/ARGS 覆盖（测试注入假 CLI）。
+// argvTemplate(goalInStdin, resumeId)：goal 一律走 stdin（规避 Windows 命令行转义/长度问题），
+//   参数模板里以 null 占位 goal 位置；resumeId 非空时追加续会话参数。
+// sessionIdKey：从 JSONL 事件里捕获会话 id 的字段路径（事件类型, 字段名）。
+const TASK_RUN_AGENTS = {
+  claude: {
+    bin: process.env.TASK_CLAUDE_BIN || 'claude',
+    args: process.env.TASK_CLAUDE_ARGS ? process.env.TASK_CLAUDE_ARGS.split(' ').filter(Boolean) : [],
+    argvTemplate: (resumeId) => [
+      '-p', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions',
+      ...(resumeId ? ['--resume', resumeId] : []),
+    ],
+    capture: { eventType: 'system', subtype: 'init', field: 'session_id' },
+    textFromEvent: (ev) => {
+      if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
+        return ev.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('');
+      }
+      return '';
+    },
+  },
+  codex: {
+    bin: process.env.TASK_CODEX_BIN || 'codex',
+    args: process.env.TASK_CODEX_ARGS ? process.env.TASK_CODEX_ARGS.split(' ').filter(Boolean) : [],
+    argvTemplate: (resumeId) => [
+      'exec', '--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox',
+      ...(resumeId ? ['resume', resumeId] : []), '-',
+    ],
+    capture: { eventType: 'thread.started', field: 'thread_id' },
+    textFromEvent: (ev) => {
+      if (ev.type === 'item.completed' && ev.item && ev.item.type === 'agent_message') {
+        return ev.item.text || '';
+      }
+      return '';
+    },
+  },
+  pi: {
+    bin: process.env.TASK_PI_BIN || 'pi',
+    args: process.env.TASK_PI_ARGS ? process.env.TASK_PI_ARGS.split(' ').filter(Boolean) : [],
+    argvTemplate: (resumeId) => ['-p', '--mode', 'json', ...(resumeId ? ['--session', resumeId] : [])],
+    capture: { eventType: 'session', field: 'id' },
+    textFromEvent: (ev) => {
+      if (ev.type === 'message_end' && ev.message && ev.message.role === 'assistant' && Array.isArray(ev.message.content)) {
+        return ev.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('');
+      }
+      return '';
+    },
+  },
+};
+
+// Windows 下 spawn 裸名 CLI 同样不解析 .cmd 包装脚本（与终端会话 resolveTerminalBin
+// 同因），任务执行的 bin 统一解析为真实可执行路径。
+for (const key of Object.keys(TASK_RUN_AGENTS)) {
+  TASK_RUN_AGENTS[key].binResolved = resolveTerminalBin(TASK_RUN_AGENTS[key].bin);
+}
+
+// 任务输出缓冲（内存）：taskId -> 全量累积文本（运行中实时追加，完成后可回放）。
+// 落盘到 <tasks 文件同目录>/task-outputs/<taskId>.log，重启后仍可查看。
+const taskOutputs = new Map();
+function taskOutputDir() {
+  return path.join(path.dirname(TASKS_FILE), 'task-outputs');
+}
+function taskOutputFile(id) {
+  return path.join(taskOutputDir(), `${id}.log`);
+}
+function loadTaskOutput(id) {
+  if (taskOutputs.has(id)) return taskOutputs.get(id);
+  try {
+    const s = fs.readFileSync(taskOutputFile(id), 'utf-8');
+    taskOutputs.set(id, s);
+    return s;
+  } catch (e) {
+    taskOutputs.set(id, '');
+    return '';
+  }
+}
+function appendTaskOutput(id, text) {
+  const cur = loadTaskOutput(id) + text;
+  taskOutputs.set(id, cur);
+  try {
+    fs.mkdirSync(taskOutputDir(), { recursive: true });
+    fs.writeFileSync(taskOutputFile(id), cur, 'utf-8');
+  } catch (e) {
+    console.error('任务输出落盘失败:', e.message);
+  }
+}
+
+// 运行中任务注册表：taskId -> child process（用于运行中判定与防重复发起）
+const runningTaskProcs = new Map();
+
+// 运行一个任务：spawn CLI（cwd = 项目目录），goal 走 stdin，流式输出广播。
+// 成功同步返回 { ok, runId }；任务字段（status/startedAt/finishedAt/cliSessionId）异步更新落盘。
+function runTask(task) {
+  const agentCfg = TASK_RUN_AGENTS[task.agent];
+  if (!agentCfg) return { ok: false, msg: `agent 仅支持：${Object.keys(TASK_RUN_AGENTS).join('/')}` };
+  const p = getProject(task.projectId);
+  if (!p) return { ok: false, msg: '项目不存在' };
+  if (!fs.existsSync(p.projectPath)) return { ok: false, msg: '项目目录不存在: ' + p.projectPath };
+
+  const resumeId = task.cliSessionId || null;
+  const argv = agentCfg.argvTemplate(resumeId);
+  // .cmd/.bat 包装脚本（npm 全局 CLI）：node ≥20.12 直接 spawn 报 EINVAL（CVE-2024-27980
+  // 修复），须 cmd /c 中转；.exe / node 脚本照常直接 spawn。goal 走 stdin 不经命令行。
+  const isCmdShim = /\.(cmd|bat)$/i.test(agentCfg.binResolved);
+  const bin = isCmdShim ? 'cmd.exe' : agentCfg.binResolved;
+  const spawnArgs = isCmdShim ? ['/c', agentCfg.binResolved, ...agentCfg.args, ...argv] : [...agentCfg.args, ...argv];
+  let proc;
+  try {
+    proc = spawn(bin, spawnArgs, {
+      cwd: p.projectPath,
+      env: sanitizeTerminalEnv(process.env),
+      windowsHide: true,
+    });
+  } catch (e) {
+    return { ok: false, msg: `启动 ${task.agent} 失败: ` + e.message };
+  }
+  runningTaskProcs.set(task.id, proc);
+
+  task.status = 'agent-running';
+  task.startedAt = new Date().toISOString();
+  delete task.finishedAt;
+  saveTasks(tasks);
+  broadcast({
+    type: 'task-run-status', taskId: task.id, status: 'agent-running',
+    startedAt: task.startedAt,
+  });
+
+  // goal 走 stdin：规避 Windows 命令行转义/长度问题
+  try { proc.stdin.write(task.goal + '\n'); proc.stdin.end(); } catch (e) {}
+
+  // stdout JSONL 逐行解析：文本增量广播 + 捕获会话 id；stderr 原样并入输出（排错可见）
+  let stdoutBuf = '';
+  const handleEvent = (ev) => {
+    const cap = agentCfg.capture;
+    if (ev.type === cap.eventType && (!cap.subtype || ev.subtype === cap.subtype) && ev[cap.field]) {
+      task.cliSessionId = ev[cap.field];
+      saveTasks(tasks);
+    }
+    const text = agentCfg.textFromEvent(ev);
+    if (text) {
+      appendTaskOutput(task.id, text + '\n');
+      broadcast({ type: 'task-run-output', taskId: task.id, data: text + '\n' });
+    }
+  };
+  proc.stdout.on('data', (chunk) => {
+    stdoutBuf += chunk.toString();
+    let nl;
+    while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
+      const line = stdoutBuf.slice(0, nl).trim();
+      stdoutBuf = stdoutBuf.slice(nl + 1);
+      if (!line) continue;
+      try { handleEvent(JSON.parse(line)); } catch (e) {
+        // 非 JSONL 行（如 codex 的日志 ERROR 行）：原样展示
+        appendTaskOutput(task.id, line + '\n');
+        broadcast({ type: 'task-run-output', taskId: task.id, data: line + '\n' });
+      }
+    }
+  });
+  proc.stderr.on('data', (chunk) => {
+    appendTaskOutput(task.id, chunk.toString());
+    broadcast({ type: 'task-run-output', taskId: task.id, data: chunk.toString() });
+  });
+
+  proc.on('error', (e) => {
+    appendTaskOutput(task.id, `[启动器] 启动 ${task.agent} 失败: ${e.message}\n`);
+    broadcast({ type: 'task-run-output', taskId: task.id, data: `[启动器] 启动 ${task.agent} 失败: ${e.message}\n` });
+  });
+
+  proc.on('close', (code) => {
+    runningTaskProcs.delete(task.id);
+    task.status = code === 0 ? 'agent-success' : 'agent-fail';
+    task.finishedAt = new Date().toISOString();
+    saveTasks(tasks);
+    broadcast({
+      type: 'task-run-status', taskId: task.id, status: task.status,
+      finishedAt: task.finishedAt, exitCode: code,
+    });
+  });
+
+  return { ok: true };
+}
+
+app.post('/api/tasks/:id/run', (req, res) => {
+  const task = tasks.find((t) => t.id === req.params.id);
+  if (!task) return res.status(404).json({ ok: false, msg: '任务不存在' });
+  if (runningTaskProcs.has(task.id)) {
+    return res.status(409).json({ ok: false, msg: '任务正在运行中' });
+  }
+  const result = runTask(task);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ok: true });
+});
+
+// 任务输出回放（弹窗查看）：返回全量累积文本
+app.get('/api/tasks/:id/output', (req, res) => {
+  const task = tasks.find((t) => t.id === req.params.id);
+  if (!task) return res.status(404).json({ ok: false, msg: '任务不存在' });
+  res.json({ ok: true, output: loadTaskOutput(task.id) });
+});
+
 
 const server = http.createServer(app);
 

@@ -15,7 +15,12 @@
 <script src="/vendor/hljs/highlight.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #1d1f21; color: #e3e3e3; color-scheme: dark; height: 100vh; display: flex; flex-direction: column; }
+  /* 任务抽屉/工作台跟随设置字体：变量由 applyTermSettings() 写到根元素 inline style，
+     :root 提供默认回退（与 DEFAULT_SETTINGS 一致），JS 未就绪/加载失败时仍有可用样式 */
+  :root { --app-font-family: "Cascadia Code", Consolas, monospace; --app-font-size: 13px; }
+  body { font-family: var(--app-font-family); background: #1d1f21; color: #e3e3e3; color-scheme: dark; height: 100vh; display: flex; flex-direction: column; }
+  /* UA 样式表不给表单控件继承字体，全局字体联动必须显式补上 */
+  button, input, select, textarea { font-family: inherit; }
   .main { flex: 1; display: flex; overflow: hidden; min-height: 0; padding: 0; gap: 0; }
   /* 自绘标题栏：始终显示（浏览器/壳内一致）。左侧品牌区、中间空白区（壳内可拖动窗口）；
      右侧窗口控制按钮仅在 Tauri 壳内显示（浏览器没有窗口可操作）。 */
@@ -24,8 +29,8 @@
   .titlebar.tauri .tb-btns { display: flex; }
   .titlebar .tb-left { flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; height: 100%; }
   .titlebar .tb-left img { width: 18px; height: 18px; display: block; pointer-events: none; }
-  .titlebar .tb-name { font-size: 13px; font-weight: 600; color: #e3e3e3; white-space: nowrap; }
-  .titlebar .tb-ver { font-size: 11px; color: #86909c; white-space: nowrap; }
+  .titlebar .tb-name { font-size: 14px; font-weight: 600; color: #e3e3e3; white-space: nowrap; }
+  .titlebar .tb-ver { font-size: 12px; color: #86909c; white-space: nowrap; }
   .titlebar .tb-btns { display: flex; align-items: center; height: 100%; flex-shrink: 0; }
   /* 窗口控制按钮：全高热区（标准 Windows 标题栏交互），关闭 hover 红 */
   .titlebar .tb-btn { width: 44px; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: #a9aeb8; cursor: pointer; border-radius: 0; transition: background .12s, color .12s; }
@@ -51,14 +56,14 @@
   .sidebar-header .collapse-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; color: #86909c; border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: background .15s, color .15s; }
   .sidebar-header .collapse-btn:hover { background: #3a3c3f; color: #e3e3e3; }
   .sidebar-header .collapse-btn svg { width: 17px; height: 17px; }
-  .sidebar-header button { background: #165dff; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .sidebar-header button { background: #165dff; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; }
   .sidebar-header button:hover { background: #0e42d2; }
   .sidebar-list { flex: 1; overflow-y: auto; min-height: 0; }
   .sidebar-list::-webkit-scrollbar { width: 5px; }
   .sidebar-list::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
   .sidebar-list::-webkit-scrollbar-thumb:hover { background: #4a4c4f; }
   .sidebar-list::-webkit-scrollbar-track { background: transparent; }
-  .panel-project .empty { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; }
+  .panel-project .empty { padding: 40px 20px; color: #6b6d70; font-size: 14px; text-align: center; }
   /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片（深色系，紧凑间距：
      左右 margin 与卡片纵向间距一致） */
   .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; }
@@ -67,6 +72,13 @@
   /* 拖拽排序：拖动中的卡片提升为浮动副本，贴随光标；原位用虚框占位。 */
   .project-item.drag-ghost { position: fixed !important; z-index: 9999; margin: 0; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.18); opacity: .96; transform: rotate(-1deg); transition: none; }
   .project-item.drag-placeholder { opacity: .35; border-style: dashed; border-color: #165dff; background: #2a3a4f; }
+  /* 折叠态有会话打开：淡橙边框 + 深色背景（同未激活会话条目 rgba(255,143,31,.45)/#1d1f21），
+     hover 走卡片通用微亮（.project-item:hover），不单独设橙底 */
+  .project-item.collapsed.has-sessions { background: #1d1f21; border-color: rgba(255,143,31,.45); }
+  /* 本规则 (0,3,0) 压过 .project-item:hover，hover 微亮需单独补（同未激活会话条目 hover #2a2e33） */
+  .project-item.collapsed.has-sessions:hover { background: #2a2e33; }
+  /* 拖拽占位符需压过上面的橙色规则（0,3,0），否则拖橙色折叠卡时虚框仍是橙底橙框 */
+  .project-item.collapsed.has-sessions.drag-placeholder { background: #2a3a4f; border-color: #165dff; }
   /* 拖动中其余卡片让位过渡（仅 translateY，避免重排抖动） */
   .sidebar-list.dragging .project-item:not(.drag-ghost):not(.drag-placeholder) { transition: transform .16s ease; }
   /* 拖动期间禁用整页文本选区，避免划过卡片文字被选中 */
@@ -79,6 +91,8 @@
   .project-item .vcs-logo img { width: 13px; height: 13px; display: block; }
   .project-item .vcs-logo:empty { display: none; }
   .project-item .name { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3e3e3; }
+  /* 折叠态运行绿点：项目运行中时显示在类型 badge 左侧（与运行状态按钮同绿色），未运行不渲染 */
+  .project-item .run-dot { width: 7px; height: 7px; border-radius: 50%; background: #00b42a; flex-shrink: 0; margin-right: 5px; }
   /* 折叠按钮：置于名称行右侧（badge 旁），复用操作按钮的图标按钮风格；折叠态旋转成展开图标 */
   .project-item .collapse-item-btn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #3a3c3f; background: transparent; border-radius: 5px; cursor: pointer; color: #86909c; flex-shrink: 0; margin-left: 6px; transition: all .15s; }
   .project-item .collapse-item-btn:hover { color: #79a8ff; border-color: #165dff; background: #2a3a4f; }
@@ -87,16 +101,16 @@
   /* 项目卡片折叠态：只显示一行项目名称 + 类型标签 + 折叠按钮，隐藏 meta / 操作按钮 / 终端会话区 */
   .project-item.collapsed .meta, .project-item.collapsed .project-actions, .project-item.collapsed .term-block { display: none; }
   /* meta 行：路径可截断（ellipsis + tooltip 见 title 属性），运行状态提示固定不截断 */
-  .project-item .meta { font-size: 12px; color: #86909c; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .project-item .meta { font-size: 13px; color: #86909c; display: flex; align-items: center; gap: 6px; min-width: 0; }
   .project-item .meta .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .project-item .meta .status { flex-shrink: 0; white-space: nowrap; }
   /* 运行状态按钮：点击显示宿主日志。复用操作按钮风格，运行中绿、已停止灰 */
-  .project-item .meta .status-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid #3a3c3f; background: transparent; border-radius: 11px; cursor: pointer; font-size: 11px; color: #86909c; transition: background .15s, color .15s, border-color .15s; }
+  .project-item .meta .status-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid #3a3c3f; background: transparent; border-radius: 11px; cursor: pointer; font-size: 12px; color: #86909c; transition: background .15s, color .15s, border-color .15s; }
   .project-item .meta .status-btn:hover { background: #3a3c3f; }
   .project-item .meta .status-btn.running { color: #00b42a; border-color: #173b1f; }
   .project-item .meta .status-btn.running:hover { background: #173b1f; border-color: #00b42a; }
   .project-item .meta .status-btn .dot { width: 6px; height: 6px; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; margin-left: 8px; flex-shrink: 0; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: 500; margin-left: 8px; flex-shrink: 0; }
   .badge.node { background: #1c2f4a; color: #79a8ff; }
   .badge.springboot { background: #4a3315; color: #ff8f1f; }
   .badge.folder { background: #173b1f; color: #4cd964; }
@@ -118,9 +132,9 @@
   .project-actions button.cmd:hover { background: #3d2a4a; border-color: #c79bff; }
   .project-actions button.del:hover { color: #f56a6a; border-color: #4a1a1a; background: #4a1a1a; }
   /* 活动栏底部：设置入口（齿轮按钮），贴底 */
-  .activity-bar .gear-btn { margin-top: auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; border-radius: 5px; cursor: pointer; color: #86909c; transition: color .12s, background .12s; }
+  .activity-bar .gear-btn { margin-top: auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; border-radius: 5px; cursor: pointer; color: #86909c; transition: color .12s, background .12s; }
   .activity-bar .gear-btn:hover { background: #3a3c3f; color: #e3e3e3; }
-  .activity-bar .gear-btn svg { width: 17px; height: 17px; display: block; }
+  .activity-bar .gear-btn svg { width: 21px; height: 21px; display: block; }
   /* 终端会话区块（claude / codex）：合并进项目卡片的会话子区域，
      分隔线以下直接继承卡片背景（深色卡片时与会话区同色），
      左竖线经 .project-item 的 border-left 贯穿到本区域。
@@ -141,7 +155,7 @@
   /* 终端按钮下拉菜单（cmd / Git Bash）：挂在 term-new-row 内，fixed 定位贴按钮下方，
      避免被卡片 overflow 裁剪；z-index 高于拖拽 ghost(9999) 以下的浮层 */
   .term-shell-menu { position: fixed; min-width: 132px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 9998; }
-  .term-shell-menu .term-shell-item { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; color: #a9aeb8; white-space: nowrap; transition: background .12s, color .12s; }
+  .term-shell-menu .term-shell-item { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #a9aeb8; white-space: nowrap; transition: background .12s, color .12s; }
   .term-shell-menu .term-shell-item:hover { background: #3a3c3f; color: #e3e3e3; }
   .term-shell-menu .term-shell-item .cmd-logo, .term-shell-menu .term-shell-item .gitbash-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; }
   .pane-tab .pane-title .claude-logo, .pane-tab .pane-title .codex-logo, .pane-tab .pane-title .cmd-logo, .pane-tab .pane-title .gitbash-logo, .pane-tab .pane-title .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; margin-right: 3px; vertical-align: -2px; }
@@ -152,20 +166,125 @@
   .console { flex: 1; display: flex; flex-direction: column; background: #1d1f21; min-width: 0; min-height: 0; border-radius: 0; overflow: hidden; }
   /* 活动栏：VSCode 风格窄竖条，位于最左缘；项目/文件/Git 三开关图标纵向排列，
      抽屉开着时对应图标高亮；底部齿轮为设置入口。 */
-  .activity-bar { flex-shrink: 0; width: 36px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; background: #232528; border-right: 1px solid #3a3c3f; }
-  .activity-bar button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 5px; transition: color .12s, background .12s; }
+  .activity-bar { flex-shrink: 0; width: 46px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; background: #232528; border-right: 1px solid #3a3c3f; }
+  .activity-bar button { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 5px; transition: color .12s, background .12s; }
   .activity-bar button:hover { background: #3a3c3f; color: #e3e3e3; }
   .activity-bar button.active { color: #165dff; background: #2a3a4f; }
-  .activity-bar button svg { width: 17px; height: 17px; display: block; }
+  .activity-bar button svg { width: 21px; height: 21px; display: block; }
   /* 活动栏分隔线：隔开「终端区功能（项目/文件/Git/编辑器）」与「定时任务」入口 */
-  .activity-bar .ab-divider { width: 20px; height: 1px; background: #3a3c3f; flex-shrink: 0; }
+  .activity-bar .ab-divider { width: 28px; height: 1px; background: #3a3c3f; flex-shrink: 0; }
   .console-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
   /* 工作台覆盖层：定时任务模式下铺满 console-main（盖住终端分栏区 + 日志抽屉），占位「建设中」。
      终端会话/xterm 实例不销毁，仅被盖住；退出工作台后原样恢复。 */
   .cron-workbench { display: none; position: absolute; inset: 0; z-index: 40; background: #1d1f21; }
-  .cron-workbench.show { display: flex; align-items: center; justify-content: center; }
-  .cron-workbench-empty { color: #6b6d70; font-style: italic; font-size: 13px; }
-  .console-body { flex: 1; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; min-height: 0; }
+  .cron-workbench.show { display: flex; align-items: stretch; justify-content: flex-start; }
+  /* cron 模式没有看板列，占位恢复居中 */
+  .cron-workbench.mode-cron.show { align-items: center; justify-content: center; }
+  .cron-workbench-empty { color: #6b6d70; font-style: italic; font-size: 14px; }
+  /* 任务看板：5 列固定顺序（列不可拖），卡片跨列自由拖动（原生 HTML5 DnD）。
+     仅 task 模式显示；cron 模式显示建设中占位（二者互斥）。 */
+  .cron-workbench .task-col { display: none; }
+  .cron-workbench.mode-task .task-col { display: flex; }
+  .cron-workbench.mode-task .cron-workbench-empty { display: none; }
+  .cron-workbench.mode-cron .cron-workbench-empty { display: block; }
+  .task-col { flex: 1; min-width: 0; flex-direction: column; border-right: 1px solid #3a3c3f; }
+  .task-col:last-child { border-right: none; }
+  .task-col.drag-over { background: #232528; }
+  .task-col-title { flex-shrink: 0; padding: 10px 12px; font-size: 14px; color: #86909c; border-bottom: 1px solid #3a3c3f; }
+  .task-col-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .task-card { position: relative; background: #232528; border: 1px solid #3a3c3f; border-radius: 6px; padding: 8px 10px; font-family: var(--app-font-family); font-size: 13px; color: #e3e3e3; cursor: pointer; line-height: 1.7; }
+  .task-card:hover { border-color: #165dff; }
+  .task-card.dragging { opacity: .4; }
+  /* 首行：项目名徽标 · agent logo · 会话标题，参考终端分栏标题样式；右上角留出状态圆点 */
+  .task-card-head { display: flex; align-items: center; gap: 6px; padding-right: 16px; min-width: 0; }
+  .task-card-head .badge { margin-left: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-card-dot { color: #e3e3e3; flex-shrink: 0; }
+  /* 会话标题（claude ai-title，随卡片宽度省略；codex/pi 无标题不渲染） */
+  .task-card-session-title { color: #86909c; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-card-agent { display: inline-flex; align-items: center; flex-shrink: 0; }
+  .task-card-agent .claude-logo, .task-card-agent .codex-logo, .task-card-agent .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; }
+  .task-card-agent .pi-logo { width: 17px; height: 17px; }
+  /* 右上角状态圆点：未发起白 / 运行中蓝闪烁 / 成功绿 / 失败红 */
+  .task-card-status { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .task-card-status.idle { background: #e3e3e3; }
+  .task-card-status.agent-running { background: #165dff; animation: taskStatusBlink 1s ease-in-out infinite; }
+  .task-card-status.agent-success { background: #00b42a; }
+  .task-card-status.agent-fail { background: #f56a6a; }
+  @keyframes taskStatusBlink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  .task-card-goal { padding: 3px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-card-meta { color: #86909c; font-size: 12px; word-break: break-all; }
+  /* 卡片右下角：启动图标按钮（idle/完成后可点，运行中禁用旋转）。
+     按钮区域内点击不冒泡到卡片（不触发编辑弹窗），在 click 处理里拦。 */
+  .task-card-foot { display: flex; align-items: center; justify-content: flex-end; margin-top: 4px; }
+  .task-card-run { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: 5px; background: transparent; color: #86909c; cursor: pointer; transition: all .12s; }
+  .task-card-run:hover:not(:disabled) { background: rgba(22,93,255,.15); color: #165dff; }
+  .task-card-run:disabled { cursor: not-allowed; color: #165dff; }
+  .task-card-run svg { width: 14px; height: 14px; }
+  .task-card-run .spin { animation: taskRunSpin 1s linear infinite; }
+  @keyframes taskRunSpin { to { transform: rotate(360deg); } }
+  /* 任务抽屉的新建任务表单 */
+  .task-form { display: flex; flex-direction: column; gap: 12px; }
+  .task-form-field label { display: block; font-family: var(--app-font-family); font-size: 13px; color: #86909c; margin-bottom: 5px; }
+  .task-form-field input, .task-form-field textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-family: var(--app-font-family); font-size: var(--app-font-size); background: #232528; color: #e3e3e3; }
+  .task-form-field textarea { line-height: 1.6; resize: vertical; }
+  .task-form-field input:focus, .task-form-field textarea:focus { outline: none; border-color: #165dff; }
+  .task-form-actions { display: flex; gap: 8px; }
+  .task-form-actions button { flex: 1; padding: 8px 0; border: none; background: #165dff; color: #fff; border-radius: 6px; font-size: 13px; font-family: var(--app-font-family); cursor: pointer; transition: background .12s; }
+  .task-form-actions button:hover { background: #0e42d2; }
+  /* 任务编辑弹窗底部：在 .modal-actions 基础上删除靠左（红描边） */
+  .task-edit-actions .danger { margin-right: auto; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-family: var(--app-font-family); border: 1px solid rgba(245,63,63,.45); background: transparent; color: #f56a6a; transition: all .12s; }
+  .task-edit-actions .danger:hover { background: rgba(245,63,63,.12); border-color: #f56a6a; }
+  /* 任务查看态：卡片头行（复用 .task-card-head 系列样式）+ 输出区（终端同款配色，滚动到底） */
+  #taskEditReadonly .task-card-session-title { font-size: 13px; }
+  #taskEditModalMeta .task-card-meta { line-height: 1.8; }
+  .task-run-output { height: 200px; overflow-y: auto; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; background: #1d1f21; color: #e3e3e3; font-family: var(--app-font-family); font-size: var(--app-font-size); line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+  .task-run-output-empty { color: #86909c; }
+  /* 任务弹窗查看态加宽：编辑态保持 .modal 默认 480px；查看态 960x680 + 纵向布局撑满高度，
+     输出区 flex:1 吃掉富余高度（拖大窗口输出区跟着变高）。拖拽缩放由右下角手柄实现。 */
+  .modal.task-modal-wide { width: 960px; height: 680px; display: flex; flex-direction: column; }
+  .modal.task-modal-wide .task-form { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .modal.task-modal-wide #taskEditOutputField { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
+  .modal.task-modal-wide #taskEditOutputField .task-run-output { flex: 1; height: auto; }
+  .modal.task-modal-wide .task-edit-actions { margin-top: 12px; }
+  .modal.task-modal-wide #taskEditNewGoalField { margin-bottom: 0; }
+  .modal.task-modal-wide #taskEditNewGoal { min-height: 64px; resize: none; }
+  /* 缩放手柄：右下角三角纹，pointer 拖拽改弹窗宽高（尺寸持久化 localStorage） */
+  .task-modal-resizer { position: absolute; right: 3px; bottom: 3px; width: 16px; height: 16px; cursor: nwse-resize; color: #86909c; display: flex; align-items: center; justify-content: center; }
+  /* 标题栏拖动：按住 h2 移动弹窗位置（transform translate，位置持久化 localStorage）。
+     负 margin 铺满弹窗顶部整宽（抵消 .modal 的 24px padding），顶部无拖不动的死区；
+     右侧 padding 留出关闭按钮位；底部分隔线与表单区分界。
+     关闭按钮覆盖：top 9px = (标题条高 46 − 按钮高 28) / 2，与 right 9px 三向对称
+     （全局 .modal-close 的 top:12 是对 .modal 的偏移，标题条铺满后偏小显不对称）。 */
+  #taskEditTitle { cursor: move; user-select: none; margin: -24px -24px 12px; padding: 12px 44px 12px 24px; border-bottom: 1px solid #3a3c3f; }
+  #taskEditOverlay .modal-close { top: 9px; right: 9px; }
+  .task-modal-resizer:hover { color: #165dff; }
+  .task-modal-resizer::before { content: ''; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; }
+  /* 任务表单自绘下拉：原生 option 渲染不了徽标/logo，按钮 + 弹出列表自绘。
+     列表挂 body fixed 弹层（见 renderTaskSelect/openTaskSelectList）；点外部/ESC 关闭。 */
+  .task-select-toggle { width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-family: var(--app-font-family); font-size: var(--app-font-size); background: #232528; color: #e3e3e3; cursor: pointer; text-align: left; }
+  .task-select-toggle:hover, .task-select.open .task-select-toggle { border-color: #165dff; }
+  .task-select-toggle .task-select-value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+  /* 闭合态富内容（名称/logo/徽标）：名称可截断，徽标与 logo 不缩 */
+  .task-select-value .task-select-item-name, .task-select-value span:not([class]) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-select-value .badge { margin-left: 0; flex-shrink: 0; }
+  .task-select-value .claude-logo, .task-select-value .codex-logo, .task-select-value .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; }
+  .task-select-value .pi-logo { width: 17px; height: 17px; }
+  .task-select-toggle .task-select-arrow { flex-shrink: 0; font-size: 11px; color: #86909c; }
+  /* 下拉列表：挂 body 的 fixed 弹层（同 term-shell-menu 模式）——抽屉 body overflow:auto
+     会裁剪内联 absolute 列表，挂 body 才可见。宽度/位置由 JS 对齐 toggle。 */
+  .task-select-popover { position: fixed; max-height: 220px; overflow-y: auto; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 9998; box-sizing: border-box; }
+  .task-select-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; font-family: var(--app-font-family); font-size: var(--app-font-size); color: #a9aeb8; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
+  .task-select-item:hover { background: #3a3c3f; color: #e3e3e3; }
+  .task-select-item.selected { color: #e3e3e3; background: #3a3c3f; }
+  .task-select-item .task-select-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 项目名徽标：与类型徽标同款配色，仅加截断能力 */
+  .task-select-item .badge.name-trunc, .task-select-value .badge.name-trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 项目名徽标与类型徽标之间的分隔点 */
+  .task-select-dot { color: #86909c; flex-shrink: 0; }
+  /* 选项内的 agent logo：复用现有 logo 常量，尺寸对齐 sub-menu-item 档 */
+  .task-select-item .claude-logo, .task-select-item .codex-logo, .task-select-item .pi-logo { width: 13px; height: 13px; color: #D97757; flex-shrink: 0; }
+  .task-select-item .pi-logo { width: 17px; height: 17px; }
+  .console-body { flex: 1; overflow: hidden; font-family: var(--app-font-family); font-size: var(--app-font-size); line-height: 1.6; color: #e3e3e3; min-height: 0; }
   .console-body .placeholder { color: #6b6d70; font-style: italic; }
   .pane-log { white-space: pre-wrap; word-break: break-all; }
   /* 模态框 */
@@ -177,8 +296,8 @@
   .modal { position: relative; background: #232528; border: 1px solid #3a3c3f; color: #e3e3e3; border-radius: 10px; padding: 24px; width: 480px; max-width: 90vw; }
   .modal h2 { font-size: 16px; margin-bottom: 18px; color: #e3e3e3; }
   .modal .field { margin-bottom: 14px; }
-  .modal label { display: block; font-size: 13px; color: #86909c; margin-bottom: 6px; }
-  .modal input { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; background: #1d1f21; color: #e3e3e3; border-radius: 6px; font-size: 13px; }
+  .modal label { display: block; font-size: 14px; color: #86909c; margin-bottom: 6px; }
+  .modal input { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; background: #1d1f21; color: #e3e3e3; border-radius: 6px; font-size: 14px; }
   .modal input:focus { outline: none; border-color: #165dff; }
   .modal .type-group { display: flex; gap: 12px; }
   .modal .type-group label { flex: 1; padding: 10px; border: 1px solid #3a3c3f; border-radius: 6px; text-align: center; cursor: pointer; }
@@ -187,30 +306,30 @@
   /* 项目目录输入框 + 「选择」按钮同行 */
   .path-row { display: flex; gap: 8px; }
   .path-row input { flex: 1; min-width: 0; }
-  .path-pick { flex-shrink: 0; padding: 8px 18px; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all .12s; }
+  .path-pick { flex-shrink: 0; padding: 8px 18px; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all .12s; }
   .path-pick:hover { border-color: #165dff; color: #4a9eff; background: rgba(22,93,255,.1); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
-  .modal-actions button { padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; border: none; }
+  .modal-actions button { padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; border: none; }
   .modal-actions .cancel { background: #2a2e33; color: #86909c; }
   .modal-actions .cancel:hover { background: #3a3c3f; color: #e3e3e3; }
   .modal-actions .save { background: #165dff; color: #fff; }
   .modal-actions .save:hover { background: #0e42d2; }
-  /* 设置模态框：左侧菜单栏（字体/关于）+ 右侧内容区 + 底部靠右按钮。
-     固定高度：切换字体/关于标签时面板高度保持一致，内容区内部滚动。 */
-  .settings-modal { width: 640px; max-width: 92vw; position: relative; height: 560px; display: flex; flex-direction: column; }
-  .settings-modal select { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 13px; background: #1d1f21; color: #e3e3e3; }
+  /* 设置模态框：左侧菜单栏（字体/命令/常用文本/文件/关于）+ 右侧内容区 + 底部靠右按钮。
+     固定高度：切换标签时面板高度保持一致，内容区内部滚动。 */
+  .settings-modal { width: 1060px; max-width: 92vw; position: relative; height: 800px; max-height: 90vh; display: flex; flex-direction: column; }
+  .settings-modal select { width: 100%; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 14px; background: #1d1f21; color: #e3e3e3; }
   .settings-modal select:focus { outline: none; border-color: #165dff; }
-  .settings-modal textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 12px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1.7; background: #1d1f21; color: #e3e3e3; resize: vertical; }
+  .settings-modal textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #3a3c3f; border-radius: 6px; font-size: 13px; font-family: var(--app-font-family); line-height: 1.7; background: #1d1f21; color: #e3e3e3; resize: vertical; }
   .settings-modal textarea:focus { outline: none; border-color: #165dff; }
-  .settings-modal .reset-cmd-btn { margin-top: 6px; padding: 4px 10px; border: 1px solid #3a3c3f; background: #2a2e33; border-radius: 5px; font-size: 12px; color: #86909c; cursor: pointer; transition: all .12s; }
+  .settings-modal .reset-cmd-btn { margin-top: 6px; padding: 4px 10px; border: 1px solid #3a3c3f; background: #2a2e33; border-radius: 5px; font-size: 13px; color: #86909c; cursor: pointer; transition: all .12s; }
   .settings-modal .reset-cmd-btn:hover { border-color: #165dff; color: #4a9eff; }
-  .settings-modal .set-hint { font-size: 11px; color: #86909c; margin-top: 4px; line-height: 1.5; }
+  .settings-modal .set-hint { font-size: 12px; color: #86909c; margin-top: 4px; line-height: 1.5; }
   /* 预览：深色底与终端面板一致，便于确认中英文对齐渲染 */
   .settings-modal .set-preview { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 12px 14px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
   .settings-layout { display: flex; gap: 20px; flex: 1; min-height: 0; }
   /* 左侧菜单栏 */
   .settings-nav { flex-shrink: 0; width: 120px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #3a3c3f; padding-right: 20px; }
-  .settings-nav-item { padding: 8px 12px; border: none; background: none; border-radius: 6px; font-size: 13px; color: #86909c; cursor: pointer; text-align: left; transition: all .12s; }
+  .settings-nav-item { padding: 8px 12px; border: none; background: none; border-radius: 6px; font-size: 14px; color: #86909c; cursor: pointer; text-align: left; transition: all .12s; }
   .settings-nav-item:hover { background: #2a2e33; color: #e3e3e3; }
   .settings-nav-item.active { background: rgba(22,93,255,.15); color: #4a9eff; font-weight: 600; }
   /* 右侧内容区：超高时内部滚动，避免撑高面板 */
@@ -222,7 +341,7 @@
   .settings-tab h2 { font-size: 15px; margin-bottom: 14px; color: #e3e3e3; }
   .settings-modal .modal-actions { border-top: 1px solid #3a3c3f; padding-top: 16px; margin-top: 18px; }
   /* 关闭叉叉：设置面板右上角，全局替代「取消」。SVG 图标保证 flex 居中，不随字体基线偏移 */
-  .settings-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 6px; transition: all .12s; }
+  .settings-close { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 6px; transition: all .12s; }
   .settings-close svg { width: 16px; height: 16px; display: block; }
   .settings-close:hover { background: rgba(245,63,63,.15); border-color: rgba(245,63,63,.45); color: #f56a6a; }
   /* 通用关闭叉叉：所有弹窗面板右上角，复用设置面板同款样式 */
@@ -230,14 +349,14 @@
   .modal-close svg { width: 16px; height: 16px; display: block; }
   .modal-close:hover { background: rgba(245,63,63,.15); border-color: rgba(245,63,63,.45); color: #f56a6a; }
   /* 关于页：markdown 渲染区。滚动由外层 .settings-content 承担（固定面板高度） */
-  .about-body { color: #e3e3e3; font-size: 13px; line-height: 1.75; }
+  .about-body { color: #e3e3e3; font-size: 14px; line-height: 1.75; }
   .about-body h1 { font-size: 18px; margin: 0 0 10px; }
   .about-body h2 { font-size: 15px; margin: 14px 0 6px; }
   .about-body h3, .about-body h4 { font-size: 14px; margin: 12px 0 6px; }
   .about-body p { margin: 8px 0; }
   .about-body ul, .about-body ol { margin: 8px 0; padding-left: 20px; }
   .about-body li { margin: 3px 0; }
-  .about-body code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; background: #2a2e33; color: #ff9a6b; padding: 1px 5px; border-radius: 4px; }
+  .about-body code { font-family: var(--app-font-family); font-size: 13px; background: #2a2e33; color: #ff9a6b; padding: 1px 5px; border-radius: 4px; }
   .about-body pre { background: #1d1f21; color: #e3e3e3; border: 1px solid #3a3c3f; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
   .about-body pre code { background: none; color: inherit; padding: 0; }
   .about-body hr { border: none; border-top: 1px solid #3a3c3f; margin: 14px 0; }
@@ -250,7 +369,7 @@
      浅色 toast 浮于顶部居中，配色按状态区分：info 蓝 / warning 橙 / error 红，
      均为项目既有色板（#165dff / #ff8f1f / #f53f3f）的浅色底 + 同系描边；
      自毁 + 可手动关闭；确认框复用 .modal 卡片样式。 */
-  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; font-size: 13px; color: #e3e3e3; box-shadow: 0 4px 12px rgba(0,0,0,.4); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: 60vw; padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; font-size: 14px; color: #e3e3e3; box-shadow: 0 4px 12px rgba(0,0,0,.4); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: 60vw; padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .15s; }
   .toast.show { opacity: 1; pointer-events: auto; }
   .toast .toast-icon { display: inline-flex; flex-shrink: 0; width: 16px; height: 16px; }
   .toast .toast-icon svg { width: 100%; height: 100%; }
@@ -265,22 +384,37 @@
   /* 分栏 tab 右键菜单：深色（与文件树右键菜单同款） */
   .pane-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.4); padding: 4px; display: none; }
   .pane-context-menu.show { display: block; }
-  .pane-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
+  .pane-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 14px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
   .pane-context-menu button:hover { background: #3a3c3f; }
   .pane-context-menu button:disabled { color: #6b6d70; cursor: not-allowed; }
   .pane-context-menu button:disabled:hover { background: none; }
   /* 文件树右键菜单：深色样式（与文件抽屉同色系 #1d1f21/#2a2e33） */
   .file-context-menu { position: fixed; z-index: 400; min-width: 168px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.4); padding: 4px; display: none; }
   .file-context-menu.show { display: block; }
-  .file-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 13px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
+  .file-context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 12px; font-size: 14px; color: #e3e3e3; cursor: pointer; border-radius: 4px; }
   .file-context-menu button:hover { background: #3a3c3f; }
   .file-context-menu button.danger { color: #f56a6a; }
   .file-context-menu button.danger:hover { background: rgba(245,63,63,.12); }
   .file-context-menu .menu-sep { height: 1px; margin: 4px 8px; background: #3a3c3f; }
-  .confirm-modal p { font-size: 13px; color: #a9aeb8; line-height: 1.7; white-space: pre-line; margin-bottom: 18px; }
+  /* 项目卡片右键菜单带图标项：图标统一 14px 与文字留间距。
+     配色复刻卡片按钮（.project-actions button.start/stop/restart/cmd 与
+     .term-new-row button 的品牌橙）；选择器收窄到本菜单 */
+  #projectCardContextMenu button svg { width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; flex-shrink: 0; }
+  #projectCardContextMenu button img { width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; }
+  #projectCardContextMenu button.m-start svg { color: #00b42a; }
+  #projectCardContextMenu button.m-stop svg { color: #f56a6a; }
+  #projectCardContextMenu button.m-restart svg { color: #ff8f1f; }
+  #projectCardContextMenu button.m-command svg { color: #c79bff; }
+  #projectCardContextMenu button.m-orange svg, #projectCardContextMenu button.m-orange img { color: #D97757; }
+  #projectCardContextMenu button:disabled { color: #6b7280; cursor: not-allowed; }
+  #projectCardContextMenu button:disabled svg { color: #6b7280; }
+  #projectCardContextMenu button:disabled img { filter: grayscale(1); opacity: .55; }
+  #projectCardContextMenu button:disabled:hover { background: none; }
+  #projectCardContextMenu button:disabled.danger { color: #6b7280; }
+  .confirm-modal p { font-size: 14px; color: #a9aeb8; line-height: 1.7; white-space: pre-line; margin-bottom: 18px; }
   /* 命令查看模态框 */
   .cmd-modal { width: 640px; max-width: 90vw; }
-  .cmd-pre { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 14px 16px; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto; }
+  .cmd-pre { background: #1d1f21; color: #e3e3e3; border-radius: 6px; padding: 14px 16px; font-family: var(--app-font-family); font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto; }
   /* claude 历史会话弹窗：摘要 + 相对时间两行列表 */
   .claude-history-modal { width: 560px; max-width: 90vw; }
   /* 标题醒目：本弹窗专属放大加粗（不影响其他 .modal h2） */
@@ -288,11 +422,11 @@
   .claude-history-list { max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
   .claude-history-item { padding: 9px 12px; border-radius: 6px; border: 1px solid #3a3c3f; background: #1d1f21; cursor: pointer; transition: all .12s; }
   .claude-history-item:hover { background: #2a2e33; border-color: #4e5969; }
-  .claude-history-summary { font-size: 13px; color: #e3e3e3; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .claude-history-time { font-size: 11px; color: #86909c; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
-  .claude-history-loading { text-align: center; font-size: 11px; color: #86909c; padding: 6px 0; }
+  .claude-history-summary { font-size: 14px; color: #e3e3e3; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .claude-history-time { font-size: 12px; color: #86909c; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .claude-history-loading { text-align: center; font-size: 12px; color: #86909c; padding: 6px 0; }
   /* 上下文徽标：配色复用项目类型 badge 色系，按大小分档（小绿/中蓝/大橙） */
-  .ctx-badge { font-size: 10px; padding: 1px 7px; border-radius: 9px; font-weight: 500; line-height: 14px; }
+  .ctx-badge { font-size: 11px; padding: 1px 7px; border-radius: 9px; font-weight: 500; line-height: 14px; }
   .ctx-badge.s { background: #173b1f; color: #4cd964; }
   .ctx-badge.m { background: #1c2f4a; color: #79a8ff; }
   .ctx-badge.l { background: #4a3315; color: #ff8f1f; }
@@ -300,31 +434,31 @@
   .modal-overlay.anchored-drawer { justify-content: flex-start; }
   /* 终端会话二级菜单：有会话时才显示，下挂各会话窗口 */
   .sub-menu { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-  .sub-menu-group { padding: 5px 12px 3px; font-size: 11px; color: #86909c; font-weight: 600; }
+  .sub-menu-group { padding: 5px 12px 3px; font-size: 12px; color: #86909c; font-weight: 600; }
   /* 会话项：深色小卡片（同项目卡片色系），hover 微亮，active 橙底高亮（与新建按钮 hover 同色系，
      和项目卡片蓝色高亮区分），logo 保留品牌橙作点缀 */
-  .sub-menu-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 1px solid #3a3c3f; background: #1d1f21; cursor: pointer; font-size: 12px; color: #a9aeb8; transition: all .12s; }
+  .sub-menu-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 1px solid rgba(255,143,31,.45); background: #1d1f21; cursor: pointer; font-size: 13px; color: #a9aeb8; transition: all .12s; }
   .sub-menu-item:hover { background: #2a2e33; border-color: #4e5969; color: #e3e3e3; }
   .sub-menu-item.active { background: #4a3315; border-color: #ff8f1f; color: #ff8f1f; font-weight: 600; }
   .sub-menu-item .label { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub-menu-item .close-x { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #6b6d70; cursor: pointer; border-radius: 3px; flex-shrink: 0; }
   .sub-menu-item .close-x:hover { background: #4a1a1a; color: #f56a6a; }
   .sub-menu-item .new-icon { font-size: 14px; }
-  .sub-menu-empty { padding: 7px 12px; font-size: 11px; color: #6b6d70; }
+  .sub-menu-empty { padding: 7px 12px; font-size: 12px; color: #6b6d70; }
   /* 分栏容器：横向 flex，每栏等分；分隔条可拖拽调宽（相邻两栏）。 */
   .console-body { position: relative; display: flex; flex-direction: row; }
   .pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
   .pane + .pane { border-left: 1px solid #3a3c3f; }
-  /* 每栏 header = 标题栏条：左侧 tab（形状化标题，激活凸起 + 顶边蓝条），右侧标题栏工具区（全高分隔线隔开）。
+  /* 每栏 header = 标题栏条：左侧 tab（形状化标题，激活凸起 + 顶边橙条），右侧标题栏工具区（全高分隔线隔开）。
      让「tab」与「标题栏上的按钮」在视觉上彻底分离。 */
-  .pane-header { flex-shrink: 0; display: flex; align-items: stretch; height: 36px; background: #232528; color: #86909c; font-size: 12px; border-bottom: 1px solid #2a2e33; cursor: default; user-select: none; }
-  /* tab：撑满 header 高度；激活态的提亮/蓝条画在整个 header 上（贯穿整栏宽度），tab 本身只承载文字 */
+  .pane-header { flex-shrink: 0; display: flex; align-items: stretch; height: 36px; background: #232528; color: #86909c; font-size: 13px; border-bottom: 1px solid #2a2e33; cursor: default; user-select: none; }
+  /* tab：撑满 header 高度；激活态的提亮/橙条画在整个 header 上（贯穿整栏宽度），tab 本身只承载文字 */
   .pane-tab { display: inline-flex; align-items: center; min-width: 0; max-width: 60%; padding: 0 12px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c; }
   .pane-tab .pane-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* 激活整栏贯穿：header 整条提亮 + 顶部 2px 蓝条横跨全宽（::before 铺满 header 顶边），
+  /* 激活整栏贯穿：header 整条提亮 + 顶部 2px 橙条横跨全宽（::before 铺满 header 顶边，同激活会话条目 #ff8f1f），
      header 底边线同步消失，与终端 body 视觉连成一体 */
   .pane.active .pane-header { background: #2a2e33; border-bottom-color: transparent; position: relative; }
-  .pane.active .pane-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #165dff; }
+  .pane.active .pane-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #ff8f1f; }
   .pane.active .pane-tab { color: #e3e3e3; }
   /* 标题栏工具区：靠右端，与 tab 区以全高分隔线隔开；承载 启/停/重/清 + 关闭 + 分栏 按钮 */
   .pane-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; padding: 0 4px 0 10px; flex-shrink: 0; }
@@ -363,23 +497,23 @@
   .pane-term.show { display: block; }
   .pane-term .term-host { position: absolute; inset: 8px; }
   /* 空白占位（会话被移走 / 初始空栏） */
-  .pane-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6b6d70; font-style: italic; font-size: 13px; }
+  .pane-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6b6d70; font-style: italic; font-size: 14px; }
   .pane-empty.hidden { display: none; }
   /* 终端栏底部状态栏：每栏一条（含空白栏），终端/空白占位上移让位；左侧放「/」命令按钮与「T」常用文本按钮 */
   .pane-body.with-status .pane-term, .pane-body.with-status .pane-empty { bottom: 25px; }
   .pane-status { position: absolute; left: 0; right: 0; bottom: 0; height: 25px; display: flex; align-items: center; gap: 4px; padding: 0 4px; box-sizing: border-box; background: #232528; border-top: 1px solid #2a2e33; user-select: none; z-index: 10; }
-  .pane-status .slash-btn, .pane-status .text-btn { height: 20px; min-width: 22px; padding: 0 6px; display: none; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; font-size: 13px; font-family: Consolas, "Cascadia Code", monospace; line-height: 1; }
+  .pane-status .slash-btn, .pane-status .text-btn { height: 20px; min-width: 22px; padding: 0 6px; display: none; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; font-size: 14px; font-family: var(--app-font-family); line-height: 1; }
   .pane-status .slash-btn.show, .pane-status .text-btn.show { display: inline-flex; }
   .pane-status .slash-btn:hover, .pane-status .text-btn:hover { background: #3a3c3f; color: #e3e3e3; }
   /* 「/」按钮弹出的常用命令列表：状态栏上方，深色与终端区一致 */
   .cmd-pop { position: absolute; left: 6px; bottom: 29px; width: 300px; max-height: 280px; overflow-y: auto; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 60; }
   .cmd-pop .cmd-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
   .cmd-pop .cmd-item:hover { background: #3a3c3f; }
-  .cmd-pop .cmd-item .cmd-name { flex-shrink: 0; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; color: #79a8ff; white-space: nowrap; }
-  .cmd-pop .cmd-item .cmd-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #86909c; }
-  .cmd-pop .cmd-empty { padding: 10px 12px; font-size: 12px; color: #6b6d70; font-style: italic; }
+  .cmd-pop .cmd-item .cmd-name { flex-shrink: 0; font-family: var(--app-font-family); font-size: 13px; color: #79a8ff; white-space: nowrap; }
+  .cmd-pop .cmd-item .cmd-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #86909c; }
+  .cmd-pop .cmd-empty { padding: 10px 12px; font-size: 13px; color: #6b6d70; font-style: italic; }
   /* 「T」按钮弹出的常用文本列表：复用 .cmd-pop 深色弹层；条目只有文本，无说明列 */
-  .cmd-pop .text-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmd-pop .text-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: var(--app-font-family); font-size: 13px; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cmd-pop .text-item:hover { background: #3a3c3f; }
   /* 拖拽排序：按住标题栏左右拖动，在目标栏间高亮插入位 */
   .pane-header { cursor: grab; }
@@ -426,7 +560,7 @@
     /* absolute 容器内 flex:1 算不出高度，用固定高度 + flex:none 让 body 撑满分栏 */
     flex: none; height: var(--log-drawer-h, 38vh); transition: height .18s ease;
   }
-  .log-drawer-header { flex-shrink: 0; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; cursor: pointer; }
+  .log-drawer-header { flex-shrink: 0; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 13px; user-select: none; cursor: pointer; }
   .log-drawer-header:hover { background: #2a2e33; }
   .log-drawer-toggle { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; transition: background .12s, color .12s; pointer-events: none; }
   .log-drawer-toggle svg { width: 16px; height: 16px; transition: transform .18s ease; }
@@ -443,11 +577,11 @@
   /* 收起态不显示图钉（收起时无可固定的展开态） */
   .console:not(.log-drawer-open) .log-drawer-pin { display: none; }
   /* 抽屉内分栏区：与终端区 console-body 同结构同样式（复用 .pane/.pane-header/.pane-log） */
-  .log-drawer-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: row; overflow: hidden; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #e3e3e3; }
+  .log-drawer-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: row; overflow: hidden; font-family: var(--app-font-family); font-size: var(--app-font-size); line-height: 1.6; color: #e3e3e3; }
   /* ---------- 文件目录浏览面板（左侧固定抽屉） ----------
      原 .console 右缘浮动叠层已并入左侧 .side-drawer（panel-file），固定停靠挤压终端区；
      不再需要独立调宽条/浮动定位，宽度统一走抽屉容器 sideDrawerWidth。 */
-  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 0; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .file-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 0; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 13px; user-select: none; }
   .file-drawer-title { font-weight: 600; color: #e3e3e3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-drawer-header .pane-btn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
   .file-drawer-header .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
@@ -455,14 +589,14 @@
   .file-drawer-header .pane-btn:disabled:hover { background: transparent; color: #86909c; }
   .file-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
   /* 面包屑：当前根项目 + 展开的层级路径；超长横向滚动 */
-  .file-drawer-breadcrumb { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 6px 10px; background: #1d1f21; border-bottom: 1px solid #2a2e33; font-size: 11px; color: #86909c; overflow-x: auto; white-space: nowrap; }
+  .file-drawer-breadcrumb { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 6px 10px; background: #1d1f21; border-bottom: 1px solid #2a2e33; font-size: 12px; color: #86909c; overflow-x: auto; white-space: nowrap; }
   .file-drawer-breadcrumb::-webkit-scrollbar { height: 4px; }
   .file-drawer-breadcrumb .crumb { cursor: pointer; color: #79a8ff; padding: 2px 4px; border-radius: 3px; flex-shrink: 0; }
   .file-drawer-breadcrumb .crumb:hover { background: #2a2e33; }
   .file-drawer-breadcrumb .crumb.cur { color: #e3e3e3; cursor: default; }
   .file-drawer-breadcrumb .sep { color: #4e5969; flex-shrink: 0; }
   /* 树容器：纵向滚动，每行缩进按 depth */
-  .file-drawer-tree { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; line-height: 1.5; color: #e3e3e3; }
+  .file-drawer-tree { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; font-family: var(--app-font-family); font-size: 14px; line-height: 1.5; color: #e3e3e3; }
   .file-drawer-tree::-webkit-scrollbar { width: 8px; }
   .file-drawer-tree::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
   .file-tree-row { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; cursor: default; user-select: none; white-space: nowrap; }
@@ -485,11 +619,11 @@
   .file-tree-row .label.vcs-R { color: #c79bff; }  /* 重命名：紫 */
   .file-tree-row .label.vcs-dir { font-weight: 600; }
   .file-tree-children { overflow: hidden; }
-  .file-tree-empty { padding: 30px 16px; color: #6b6d70; font-size: 12px; text-align: center; font-style: italic; }
-  .file-tree-loading { padding: 14px 16px; color: #6b6d70; font-size: 12px; font-style: italic; }
+  .file-tree-empty { padding: 30px 16px; color: #6b6d70; font-size: 13px; text-align: center; font-style: italic; }
+  .file-tree-loading { padding: 14px 16px; color: #6b6d70; font-size: 13px; font-style: italic; }
   /* ---------- Git 面板（左侧固定抽屉） ----------
      原 .console 右缘浮动抽屉已并入左侧 .side-drawer（panel-git），与文件面板互斥显示。 */
-  .git-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 12px; user-select: none; }
+  .git-drawer-header { flex-shrink: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #232528; border-bottom: 1px solid #2a2e33; color: #86909c; font-size: 13px; user-select: none; }
   /* Git/SVN 抽屉标题栏 logo：用 GITBASH_LOGO/SVN_LOGO（官方 favicon data URI），
      16px 视觉与标题文字同高；img 与 svg 共用 gitbash-logo 类的基础规则 */
   .git-drawer-logo { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -506,7 +640,7 @@
   .git-drawer-header .pane-btn svg { width: 15px; height: 15px; display: block; }
   /* 头部按钮间距收紧（刷新/条列/树状/关闭四个按钮靠拢） */
   .git-drawer-header .pane-btn + .pane-btn { margin-left: -4px; }
-  .git-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 12px; color: #e3e3e3; display: flex; flex-direction: column; }
+  .git-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 13px; color: #e3e3e3; display: flex; flex-direction: column; }
   .git-drawer-body::-webkit-scrollbar { width: 8px; }
   .git-drawer-body::-webkit-scrollbar-thumb { background: #3a3c3f; border-radius: 4px; }
   /* 「提交历史」抽屉条：body 转 flex column 后，历史区 margin-top:auto 钉在抽屉底部——
@@ -519,14 +653,14 @@
   .git-history-list { overflow: hidden; transition: height .2s ease; }
   /* 分支区：分支名（按钮态，点击弹分支面板）+ 刷新 */
   .git-branch-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-  .git-branch-name { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: none; background: transparent; cursor: pointer; padding: 3px 6px; margin-left: -6px; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0; transition: background .12s; }
+  .git-branch-name { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: #79a8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: none; background: transparent; cursor: pointer; padding: 3px 6px; margin-left: -6px; border-radius: 4px; font-size: 13px; flex: 1; min-width: 0; transition: background .12s; }
   .git-branch-name:hover { background: #3a3c3f; }
   .git-branch-name svg { width: 13px; height: 13px; flex-shrink: 0; }
-  .git-branch-name .caret { font-size: 9px; color: #86909c; flex-shrink: 0; }
+  .git-branch-name .caret { font-size: 10px; color: #86909c; flex-shrink: 0; }
   /* 分支面板：分支名下方浮层，本地分支列表 + 新建分支表单 */
   .git-branch-pop { position: relative; margin: -4px 0 8px; }
   .git-branch-menu { border: 1px solid #3a3c3f; border-radius: 6px; background: #2a2e33; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
-  .git-branch-item { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: transparent; color: #e3e3e3; font-size: 12px; text-align: left; padding: 5px 8px; cursor: pointer; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-branch-item { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: transparent; color: #e3e3e3; font-size: 13px; text-align: left; padding: 5px 8px; cursor: pointer; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-branch-item:hover { background: #3a3c3f; }
   .git-branch-item.current { color: #79a8ff; font-weight: 600; }
   .git-branch-item .tick { width: 12px; flex-shrink: 0; visibility: hidden; }
@@ -534,36 +668,36 @@
   .git-branch-item.new-entry { color: #86909c; border-top: 1px solid #3a3c3f; border-radius: 0 0 4px 4px; margin-top: 2px; padding-top: 6px; }
   .git-branch-item.new-entry svg { width: 12px; height: 12px; flex-shrink: 0; }
   /* 远程分支组：组标题灰显小字，条目灰字 + 检出箭头 */
-  .git-branch-item.remote-head { font-size: 11px; color: #86909c; border-top: 1px solid #3a3c3f; margin-top: 2px; padding-top: 6px; }
+  .git-branch-item.remote-head { font-size: 12px; color: #86909c; border-top: 1px solid #3a3c3f; margin-top: 2px; padding-top: 6px; }
   .git-branch-item.remote { color: #a8b3bf; }
-  .git-branch-item.remote .dl { margin-left: auto; font-size: 11px; color: #79a8ff; }
+  .git-branch-item.remote .dl { margin-left: auto; font-size: 12px; color: #79a8ff; }
   /* 新建分支表单（面板内二段式） */
   .git-branch-form { padding: 6px 8px 8px; border-top: 1px solid #3a3c3f; margin-top: 2px; }
-  .git-branch-form input[type="text"] { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #3a3c3f; border-radius: 5px; background: #212428; color: #e3e3e3; font-size: 12px; margin-bottom: 6px; }
+  .git-branch-form input[type="text"] { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #3a3c3f; border-radius: 5px; background: #212428; color: #e3e3e3; font-size: 13px; margin-bottom: 6px; }
   .git-branch-form input[type="text"]:focus { outline: none; border-color: #79a8ff; }
-  .git-branch-form select { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #3a3c3f; border-radius: 5px; background: #212428; color: #e3e3e3; font-size: 12px; margin-bottom: 6px; }
-  .git-branch-form .form-label { font-size: 11px; color: #86909c; margin-bottom: 4px; }
+  .git-branch-form select { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #3a3c3f; border-radius: 5px; background: #212428; color: #e3e3e3; font-size: 13px; margin-bottom: 6px; }
+  .git-branch-form .form-label { font-size: 12px; color: #86909c; margin-bottom: 4px; }
   .git-branch-form .form-btns { display: flex; gap: 6px; }
-  .git-branch-form .form-btns button { flex: 1; padding: 4px 0; border: none; border-radius: 5px; background: #79a8ff; color: #1b1d20; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .git-branch-form .form-btns button { flex: 1; padding: 4px 0; border: none; border-radius: 5px; background: #79a8ff; color: #1b1d20; font-size: 13px; font-weight: 600; cursor: pointer; }
   .git-branch-form .form-btns button.ghost { background: #3a3c3f; color: #e3e3e3; font-weight: 400; }
-  .git-branch-form .form-err { color: #ff7b72; font-size: 11px; margin-bottom: 6px; word-break: break-all; }
+  .git-branch-form .form-err { color: #ff7b72; font-size: 12px; margin-bottom: 6px; word-break: break-all; }
   .git-branch-row .pane-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: #86909c; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: color .12s, background .12s; }
   .git-branch-row .pane-btn:hover { background: #3a3c3f; color: #e3e3e3; }
   .git-branch-row .pane-btn:disabled { opacity: .35; cursor: not-allowed; }
   .git-branch-row .pane-btn svg { width: 14px; height: 14px; display: block; }
   .git-net-row { display: flex; gap: 6px; margin-bottom: 10px; }
-  .git-net-row button { flex: 1; padding: 5px 0; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 5px; font-size: 12px; cursor: pointer; transition: all .12s; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .git-net-row button { flex: 1; padding: 5px 0; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; border-radius: 5px; font-size: 13px; cursor: pointer; transition: all .12s; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
   .git-net-row button:hover { color: #e3e3e3; border-color: #165dff; background: #2a3a4f; }
   .git-net-row button:disabled { opacity: .4; cursor: not-allowed; }
   /* push/pull 按钮上的领先/落后数字徽标：ahead 橙（待推送）、behind 蓝（待拉取），无差异不渲染 */
-  .git-net-row .git-ab { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 1; }
+  .git-net-row .git-ab { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 15px; padding: 0 4px; border-radius: 8px; font-size: 11px; font-weight: 600; line-height: 1; }
   .git-net-row .git-ab.ahead { background: #4a3315; color: #ff8f1f; }
   .git-net-row .git-ab.behind { background: #1c2f4a; color: #79a8ff; }
   /* 分组标题：staged / unstaged / 历史。padding-left 与 .git-file-row 一致，全选勾选框与文件勾选框纵向对齐 */
-  .git-section-title { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; padding-left: 6px; font-size: 11px; color: #86909c; font-weight: 600; }
+  .git-section-title { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; padding-left: 6px; font-size: 12px; color: #86909c; font-weight: 600; }
   /* 「提交历史」与上方变更文件列表之间的分割线：#3a3c3f 比 #2a2e33 高两档，深底上肉眼可辨 */
   .git-section-title.history { border-top: 1px solid #3a3c3f; padding-top: 10px; margin-top: 14px; }
-  .git-section-title .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 500; }
+  .git-section-title .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 500; }
   /* 分组标题全选勾选框：与文件行勾选框同宽纵向对齐；选中态绿色（accent-color 着色原生勾选框） */
   .git-section-title input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: #4cd964; }
   /* 变更列表行：勾选框 + 状态标 + 文件名；点文件名看 diff。
@@ -571,7 +705,7 @@
   .git-file-row { display: flex; align-items: center; gap: 6px; height: 26px; margin-left: 0; padding: 0 6px; border-radius: 5px; cursor: default; user-select: none; }
   .git-file-row:hover { background: #2a2e33; }
   .git-file-row input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: #4cd964; }
-  .git-file-row .st { flex-shrink: 0; width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 3px; font-size: 10px; font-weight: 700; font-family: Consolas, monospace; }
+  .git-file-row .st { flex-shrink: 0; width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 3px; font-size: 11px; font-weight: 700; font-family: var(--app-font-family); }
   .git-file-row .st.M { background: #4a3315; color: #ff8f1f; }
   .git-file-row .st.A { background: #173b1f; color: #4cd964; }
   .git-file-row .st.D { background: #4a1a1a; color: #f56a6a; }
@@ -586,14 +720,14 @@
   .svn-unstage-btn { flex-shrink: 0; width: 16px; height: 16px; line-height: 14px; padding: 0; text-align: center; border: none; background: transparent; color: #86909c; font-size: 14px; cursor: pointer; border-radius: 3px; }
   .svn-unstage-btn:hover { background: #4a1a1a; color: #f56a6a; }
   /* SVN A 状态条目的「撤销版本控制」按钮（↩）：撤销 svn add，文件回无版本管理区 */
-  .svn-unadd-btn { flex-shrink: 0; width: 16px; height: 16px; line-height: 14px; padding: 0; text-align: center; border: none; background: transparent; color: #86909c; font-size: 13px; cursor: pointer; border-radius: 3px; }
+  .svn-unadd-btn { flex-shrink: 0; width: 16px; height: 16px; line-height: 14px; padding: 0; text-align: center; border: none; background: transparent; color: #86909c; font-size: 14px; cursor: pointer; border-radius: 3px; }
   .svn-unadd-btn:hover { background: #1c2f4a; color: #79a8ff; }
   /* 撤销修改按钮的文件+回转箭头 SVG：占满按钮（16px），笔画继承按钮色 */
   .svn-unadd-btn svg { width: 13px; height: 13px; display: block; margin: 0 auto; }
   /* SVN 可折叠分区标题（更改/无版本管理）：点标题整组折叠展开；全选框 stopPropagation 不触发折叠 */
   .git-section-title.foldable { cursor: pointer; user-select: none; border-radius: 5px; }
   .git-section-title.foldable:hover { color: #c9cdd4; }
-  .git-section-title .caret { color: #86909c; font-size: 13px; width: 13px; flex-shrink: 0; }
+  .git-section-title .caret { color: #86909c; font-size: 14px; width: 13px; flex-shrink: 0; }
   /* SVN 分区条目相对分区标题缩进一级（待提交/更改/无版本管理共用；树状模式行内 margin 覆盖）。
      文件行比目录行多缩进一档（VC_FILE_INDENT_EXTRA）：文件行有 A/M/D 状态徽标，多让出一点更协调 */
   .git-file-row.svn-child { margin-left: 24px; }
@@ -602,20 +736,20 @@
   .git-file-row.vc-dir-row { cursor: pointer; gap: 2px; }
   .git-file-row.vc-dir-row .dname { margin-left: 4px; }
   .git-file-row.vc-dir-row .cnt { margin-left: 4px; }
-  .git-file-row.vc-dir-row .caret { color: #86909c; font-size: 13px; width: 13px; flex-shrink: 0; }
+  .git-file-row.vc-dir-row .caret { color: #86909c; font-size: 14px; width: 13px; flex-shrink: 0; }
   /* 树状行图标：目录/文件统一 15px（含叶子行的 file-icon，与 dir-icon 同规格） */
   .git-file-row .dir-icon, .git-file-row .file-icon { width: 15px; height: 15px; flex-shrink: 0; color: #a9aeb8; }
   .git-file-row.vc-dir-row .dname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9cdd4; }
-  .git-file-row.vc-dir-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 500; }
+  .git-file-row.vc-dir-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 500; }
   .git-file-row.vc-dir-row input[type=checkbox] { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: #4cd964; }
   /* 树状视图子层级容器：缩进由行内 margin-left 控制，容器本身不额外缩进 */
   .vc-tree-children { margin: 0; }
   /* 提交区：textarea + 提交按钮 */
   .git-commit-area { margin-top: 10px; border-top: 1px solid #2a2e33; padding-top: 8px; }
-  .git-commit-area textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #3a3c3f; border-radius: 5px; background: #2a2e33; color: #e3e3e3; font-size: 12px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; resize: vertical; min-height: 48px; }
+  .git-commit-area textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #3a3c3f; border-radius: 5px; background: #2a2e33; color: #e3e3e3; font-size: 13px; font-family: var(--app-font-family); resize: vertical; min-height: 48px; }
   .git-commit-area textarea:focus { outline: none; border-color: #165dff; }
   .git-commit-btns { margin-top: 6px; display: flex; gap: 6px; }
-  .git-commit-btn { flex: 1; padding: 6px 0; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 12px; cursor: pointer; transition: background .12s; }
+  .git-commit-btn { flex: 1; padding: 6px 0; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 13px; cursor: pointer; transition: background .12s; }
   .git-commit-btn:hover { background: #0e42d2; }
   .git-commit-btn:disabled { opacity: .4; cursor: not-allowed; }
   /* 提交/提交并推送在途：被点的按钮文字前转圈圈 */
@@ -639,46 +773,46 @@
   .git-log-row { padding: 5px 6px; border-radius: 5px; cursor: pointer; }
   .git-log-row:hover { background: #2a2e33; }
   .git-log-row .subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-  .git-log-row .meta { font-size: 10px; color: #6b6d70; margin-top: 1px; display: flex; gap: 8px; align-items: center; }
-  .git-log-row .meta .hash { font-family: Consolas, monospace; color: #79a8ff; }
+  .git-log-row .meta { font-size: 11px; color: #6b6d70; margin-top: 1px; display: flex; gap: 8px; align-items: center; }
+  .git-log-row .meta .hash { font-family: var(--app-font-family); color: #79a8ff; }
   /* 历史行「未推送」徽标：橙色小标签（与推送按钮 ahead 徽标同色系），已推送不渲染 */
-  .git-log-row .git-push-badge { flex-shrink: 0; background: #4a3315; color: #ff8f1f; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 600; line-height: 14px; }
+  .git-log-row .git-push-badge { flex-shrink: 0; background: #4a3315; color: #ff8f1f; border-radius: 3px; padding: 0 4px; font-size: 10px; font-weight: 600; line-height: 14px; }
   /* SVN 历史行「未更新」徽标：蓝色小标签（与更新按钮 behind 徽标同色系），rev > 本地基准版本才渲染 */
-  .git-log-row .svn-outdated-badge { flex-shrink: 0; background: #1c2f4a; color: #79a8ff; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 600; line-height: 14px; }
+  .git-log-row .svn-outdated-badge { flex-shrink: 0; background: #1c2f4a; color: #79a8ff; border-radius: 3px; padding: 0 4px; font-size: 10px; font-weight: 600; line-height: 14px; }
   /* 历史条目展开：提交行下方的变更文件列表（缩进对齐提交行） */
   .git-log-item { border-radius: 5px; }
-  .git-log-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 5px; font-size: 9px; font-weight: 500; }
+  .git-log-row .cnt { background: #3a3c3f; color: #e3e3e3; border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 500; }
   .git-log-files { margin: 2px 0 6px 14px; padding: 2px 0; border-left: 2px solid #3a3c3f; }
-  .git-log-file { display: flex; align-items: baseline; gap: 4px; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; overflow: hidden; white-space: nowrap; }
+  .git-log-file { display: flex; align-items: baseline; gap: 4px; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; overflow: hidden; white-space: nowrap; }
   .git-log-file:hover { background: #2a2e33; }
   .git-log-file:hover .git-log-file-name { color: #79a8ff; text-decoration: underline; }
   .git-log-file .git-log-file-name { color: #e3e3e3; flex-shrink: 0; }
   .git-log-file .dir { color: #6b6d70; overflow: hidden; text-overflow: ellipsis; }
-  .git-log-file-empty { padding: 3px 8px; font-size: 10px; color: #6b6d70; font-style: italic; }
+  .git-log-file-empty { padding: 3px 8px; font-size: 11px; color: #6b6d70; font-style: italic; }
   /* diff 预览模态框：左右对比布局（左旧右新，行对齐，同步滚动） */
   .git-diff-modal { width: 1100px; max-width: 94vw; }
   .git-diff-wrap { position: relative; }
-  .git-diff-loading { padding: 30px; text-align: center; color: #86909c; font-size: 13px; font-style: italic; }
+  .git-diff-loading { padding: 30px; text-align: center; color: #86909c; font-size: 14px; font-style: italic; }
   .git-diff-cols { display: flex; gap: 8px; }
   .git-diff-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .git-diff-col-head { flex-shrink: 0; padding: 5px 10px; background: #2a2e33; border-radius: 5px 5px 0 0; font-size: 11px; font-weight: 600; color: #86909c; user-select: none; }
+  .git-diff-col-head { flex-shrink: 0; padding: 5px 10px; background: #2a2e33; border-radius: 5px 5px 0 0; font-size: 12px; font-weight: 600; color: #86909c; user-select: none; }
   .git-diff-col:first-child .git-diff-col-head { border-bottom: 1px solid rgba(245,106,106,.25); }
   .git-diff-col:last-child .git-diff-col-head { border-bottom: 1px solid rgba(76,217,100,.25); }
-  .git-diff-pre { margin: 0; border-radius: 0 0 6px 6px; height: 60vh; overflow: auto; font-size: 12px; line-height: 1.55; tab-size: 4; }
+  .git-diff-pre { margin: 0; border-radius: 0 0 6px 6px; height: 60vh; overflow: auto; font-family: var(--app-font-family); font-size: var(--app-font-size); line-height: 1.55; tab-size: 4; }
   .git-diff-pre .dl { display: block; white-space: pre; }
   .git-diff-pre .diff-add { color: #4cd964; background: rgba(76,217,100,.1); display: block; }
   .git-diff-pre .diff-del { color: #f56a6a; background: rgba(245,106,106,.1); display: block; }
   .git-diff-pre .diff-hunk { color: #79a8ff; display: block; }
   .git-diff-pre .diff-ctx { color: #a9aeb8; display: block; }
-  .git-empty { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; text-align: center; }
-  .git-loading { padding: 14px 10px; color: #6b6d70; font-size: 12px; font-style: italic; }
-  .git-not-repo { padding: 40px 20px; color: #6b6d70; font-size: 13px; text-align: center; line-height: 1.8; }
+  .git-empty { padding: 14px 10px; color: #6b6d70; font-size: 13px; font-style: italic; text-align: center; }
+  .git-loading { padding: 14px 10px; color: #6b6d70; font-size: 13px; font-style: italic; }
+  .git-not-repo { padding: 40px 20px; color: #6b6d70; font-size: 14px; text-align: center; line-height: 1.8; }
   /* 非仓库占位页的初始化按钮：主蓝底与提交按钮同款 */
-  .git-init-btn { margin-top: 10px; padding: 6px 20px; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 12px; cursor: pointer; transition: background .12s; }
+  .git-init-btn { margin-top: 10px; padding: 6px 20px; border: none; background: #165dff; color: #fff; border-radius: 5px; font-size: 13px; cursor: pointer; transition: background .12s; }
   .git-init-btn:hover { background: #0e42d2; }
   .git-init-btn:disabled { opacity: .4; cursor: not-allowed; }
   /* 无远端引导：提交历史上方的小字提示 */
-  .git-remote-hint { margin: 0 0 8px; padding: 6px 10px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 5px; font-size: 11px; color: #86909c; line-height: 1.5; }
+  .git-remote-hint { margin: 0 0 8px; padding: 6px 10px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 5px; font-size: 12px; color: #86909c; line-height: 1.5; }
   /* 文件编辑器窗口（多 tab）：可拖动/可缩放的"桌面窗口"式浮动窗。
      非模态：overlay 全透明且 pointer-events:none（点击穿透到后面的 UI），
      仅窗口本体接收交互；窗口位置由 JS 控制（拖动改 left/top，缩放改宽高并保持对边固定）。 */
@@ -690,7 +824,7 @@
   .file-view-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 0 10px; height: 24px; border-bottom: 1px solid #3a3c3f; border-radius: 10px 10px 0 0; cursor: move; user-select: none; flex-shrink: 0; background: #232528; }
   /* 用 .modal 前缀抬优先级：否则全局 .modal h2 的 margin-bottom:18px 会盖掉 margin:0，
      导致标题在 24px 标题栏里贴顶/偏移 */
-  .modal .file-view-title { font-size: 12.5px; margin: 0; line-height: 24px; font-family: Consolas, "Cascadia Code", monospace; font-weight: 600; color: #e3e3e3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  .modal .file-view-title { font-size: 13px; margin: 0; line-height: 24px; font-family: var(--app-font-family); font-weight: 600; color: #e3e3e3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
   .file-view-titlebar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .file-view-tb-btn { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; background: #2a2e33; color: #86909c; cursor: pointer; border-radius: 4px; transition: all .12s; flex-shrink: 0; }
   .file-view-tb-btn svg { width: 12px; height: 12px; display: block; }
@@ -699,7 +833,7 @@
   /* tab 栏：每打开一个文件一个 tab。tab 只显示文件名（title 悬浮完整路径），脏标记为左侧圆点 */
   .fv-tabbar { display: none; align-items: stretch; gap: 2px; padding: 3px 6px 0; background: #232528; border-bottom: 1px solid #3a3c3f; overflow-x: auto; scrollbar-width: thin; flex-shrink: 0; user-select: none; }
   .fv-tabbar.has-tabs { display: flex; }
-  .fv-tab { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; padding: 3px 8px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; font-size: 12px; font-family: Consolas, "Cascadia Code", monospace; color: #86909c; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .fv-tab { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; padding: 3px 8px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; font-size: 13px; font-family: var(--app-font-family); color: #86909c; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
   .fv-tab .fv-tab-name { overflow: hidden; text-overflow: ellipsis; }
   .fv-tab:hover { background: #2a2e33; }
   .fv-tab.active { background: #1d1f21; border-color: #3a3c3f; color: #e6edf3; font-weight: 600; }
@@ -712,16 +846,17 @@
   .fv-tab.dragging { opacity: .45; }
   .fv-tabbar { position: relative; }
   .file-view-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 0 0 10px 10px; }
-  .file-view-loading { padding: 30px; text-align: center; color: #86909c; font-size: 13px; font-style: italic; }
-  .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; color: #86909c; font-size: 13px; line-height: 1.7; }
+  .file-view-loading { padding: 30px; text-align: center; color: #86909c; font-size: 14px; font-style: italic; }
+  .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; color: #86909c; font-size: 14px; line-height: 1.7; }
   /* 代码区：行号 gutter + 代码两列，pre 内滚动（不用 overlay 滚动，缩放时尺寸跟随窗口）。
      常态即编辑态（contenteditable code）。gutter 是 code 的兄弟元素，不在编辑区里——
      innerText 读不到，行号不会混进文件内容；行数由 JS 按内容行数刷新（输入时 debounce）。 */
-  /* 字体/字号不写死：由 JS 写入（跟随设置面板的终端字体，见 applyTermSettings） */
-  .file-view-pre { flex: 1; min-height: 0; margin: 0; overflow: auto; display: flex; align-items: stretch; line-height: 1.35; tab-size: 4; border-radius: 0 0 10px 10px; background: #0d1117; }
+  /* 字体/字号跟随设置：font（全局变量）+ size（显式引用 --app-font-size）；
+     UA 给 pre/code 自带 monospace，不写会阻断继承 */
+  .file-view-pre { flex: 1; min-height: 0; margin: 0; overflow: auto; display: flex; align-items: stretch; font-family: var(--app-font-family); font-size: var(--app-font-size); line-height: 1.35; tab-size: 4; border-radius: 0 0 10px 10px; background: #0d1117; }
   /* gutter：随 pre 纵向滚动、横向固定（sticky left），数字右对齐，与代码行同 line-height */
   .fv-gutter { flex-shrink: 0; position: sticky; left: 0; min-width: 3.2em; padding: 12px 10px 12px 6px; text-align: right; color: #484f58; background: #0d1117; user-select: none; border-right: 1px solid #1c2128; white-space: pre; z-index: 1; }
-  .file-view-pre code { flex: 1; display: block; padding: 12px 16px 12px 14px; white-space: pre; outline: none; caret-color: #e6edf3; min-width: 0; }
+  .file-view-pre code { flex: 1; display: block; padding: 12px 16px 12px 14px; white-space: pre; outline: none; caret-color: #e6edf3; min-width: 0; font-family: var(--app-font-family); font-size: var(--app-font-size); }
   .file-view-pre code:empty::before { content: '\200b'; } /* 空文件也给占位高度，否则光标敲不进 */
   /* 八方向缩放手柄：贴边透明热区，hover 显紫色描边提示；角上的热区比边大 */
   .fv-rz { position: absolute; z-index: 10; }
@@ -817,7 +952,28 @@
         <span class="git-drawer-title">任务</span>
         <button class="pane-btn" title="关闭" onclick="closeTaskDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       </div>
-      <div class="git-drawer-body"><div class="git-empty">建设中</div></div>
+      <div class="git-drawer-body">
+        <!-- 新建任务：选项目/agent + 输目标，两个入列按钮（想法 / 待执行）。
+             项目/agent 为自绘下拉（原生 option 不支持徽标/logo），条目内可渲染 HTML。 -->
+        <div class="task-form">
+          <div class="task-form-field">
+            <label>项目</label>
+            <div class="task-select" id="taskProjectSel"></div>
+          </div>
+          <div class="task-form-field">
+            <label>Agent</label>
+            <div class="task-select" id="taskAgentSel"></div>
+          </div>
+          <div class="task-form-field">
+            <label>目标</label>
+            <textarea id="taskGoalInput" rows="3" placeholder="这个任务要完成什么"></textarea>
+          </div>
+          <div class="task-form-actions">
+            <button onclick="createTask('idea')">添加到想法</button>
+            <button onclick="createTask('todo')">添加到待执行</button>
+          </div>
+        </div>
+      </div>
     </div>
     <!-- 定时任务面板：header 与文件/Git 面板同构；关闭按钮只收抽屉（不影响工作台态） -->
     <div class="side-panel panel-cron" id="panelCron">
@@ -839,7 +995,16 @@
     <!-- 工作台覆盖层：任务/定时任务共用（同终端分栏区被多个功能共用），铺满 console-main
          （终端分栏区 + 日志抽屉一并覆盖）。show 类切换显隐；终端会话/xterm 实例不受影响，
          切回原样恢复；当前功能由 #workbench 持久化值（task/cron）决定。 -->
-    <div class="cron-workbench" id="workbench"><div class="cron-workbench-empty">建设中</div></div>
+    <div class="cron-workbench" id="workbench">
+      <!-- 任务看板（仅 task 模式显示，见 mode-task 类）：5 列固定（列不可拖），
+           卡片可跨列自由拖动（原生 HTML5 DnD），列内容由 renderTaskBoard() 渲染。 -->
+      <div class="task-col" data-column="idea"><div class="task-col-title">想法</div><div class="task-col-body"></div></div>
+      <div class="task-col" data-column="todo"><div class="task-col-title">待执行</div><div class="task-col-body"></div></div>
+      <div class="task-col" data-column="doing"><div class="task-col-title">任务中</div><div class="task-col-body"></div></div>
+      <div class="task-col" data-column="review"><div class="task-col-title">待审核</div><div class="task-col-body"></div></div>
+      <div class="task-col" data-column="done"><div class="task-col-title">已完成</div><div class="task-col-body"></div></div>
+      <div class="cron-workbench-empty">建设中</div>
+    </div>
     <!-- xterm 隐藏暂存区：未显示的会话 xterm 实例统一挂这里（display:none），
          某栏显示该会话时再把对应 .term-host 节点移入该栏 body，杜绝脱离 DOM 导致 fit 失效。 -->
     <div id="xtermWrap"></div>
@@ -1040,6 +1205,10 @@
   <button data-act="reveal">在资源管理器中打开</button>
 </div>
 
+<!-- 项目卡片头部行（项目名+徽标）右键菜单：卡片全部功能入口，图标复用卡片按钮同款 SVG。
+     按钮内容由 showProjectCardContextMenu 按项目类型/运行状态动态生成（含置灰 disabled）。 -->
+<div class="file-context-menu" id="projectCardContextMenu"></div>
+
 <!-- 自绘确认框（替代原生 confirm） -->
 <!-- 确认框：z-index 走 .modal-overlay 基础值 400，高于文件编辑器窗口(150) -->
 <div class="modal-overlay" id="confirmOverlay">
@@ -1055,7 +1224,63 @@
   </div>
 </div>
 
-<!-- 设置模态框：左侧菜单（字体/关于）+ 右侧内容区 + 底部靠右按钮 -->
+<!-- 任务编辑/查看弹窗：点看板卡片打开。标题统一「任务面板」。
+     未发起=编辑态（项目/agent/目标可改、可删除，按钮 删除/取消/保存）；
+     查看/续跑态=卡片化布局：卡片头（项目徽标·会话标题·agent logo）→ 创建时间 → 输出 →
+     启动/完成·用时 meta → 新目标输入（运行中隐藏）→ 按钮行（取消/保存/执行；运行中只有取消）。 -->
+<div class="modal-overlay" id="taskEditOverlay">
+  <div class="modal">
+    <button type="button" class="modal-close" onclick="closeTaskEditModal()" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+    <h2 id="taskEditTitle">任务面板</h2>
+    <div class="task-form">
+      <div class="task-form-field" id="taskEditProjectField">
+        <label>项目</label>
+        <div class="task-select" id="taskEditProjectSel"></div>
+      </div>
+      <div class="task-form-field" id="taskEditAgentField">
+        <label>Agent</label>
+        <div class="task-select" id="taskEditAgentSel"></div>
+      </div>
+      <!-- 查看/续跑态第一行=卡片头（编辑态隐藏）：项目徽标 · 会话标题 · agent logo（复用卡片样式） -->
+      <div class="task-form-field" id="taskEditReadonlyField" style="display:none">
+        <div class="task-card-head" id="taskEditReadonly"></div>
+      </div>
+      <!-- 查看/续跑态第二行：创建时间（编辑态隐藏，JS 填充） -->
+      <div id="taskEditModalCreated" style="display:none"></div>
+      <!-- 输出区：运行中实时流式 / 完成后回放 -->
+      <div class="task-form-field" id="taskEditOutputField" style="display:none">
+        <label id="taskEditOutputLabel">任务输出</label>
+        <div class="task-run-output" id="taskEditOutput"><div class="task-run-output-empty">暂无输出</div></div>
+      </div>
+      <!-- 查看/续跑态第四行：启动 · 完成 · 用时（卡片最后一行同款，编辑态隐藏） -->
+      <div id="taskEditModalMeta" style="display:none"></div>
+      <!-- 编辑态目标输入；查看态最底部新目标输入（运行中隐藏） -->
+      <div class="task-form-field" id="taskEditGoalField">
+        <label>目标</label>
+        <textarea id="taskEditGoal" rows="3" placeholder="这个任务要完成什么"></textarea>
+      </div>
+      <div class="task-form-field" id="taskEditNewGoalField" style="display:none">
+        <label>新目标（在原会话基础上再次发起）</label>
+        <textarea id="taskEditNewGoal" rows="3" placeholder="输入新目标"></textarea>
+      </div>
+      <!-- 编辑态按钮行：删除/取消/保存；查看态按钮行：取消/保存/执行（运行中只取消） -->
+      <div class="modal-actions task-edit-actions" id="taskEditActionsEdit">
+        <button class="danger" id="taskEditDelBtn" onclick="deleteTaskFromEdit()">删除任务</button>
+        <button class="cancel" onclick="closeTaskEditModal()">取消</button>
+        <button class="save" onclick="saveTaskEdit()">保存</button>
+      </div>
+      <div class="modal-actions task-edit-actions" id="taskEditActionsView" style="display:none">
+        <button class="cancel" id="taskEditCloseBtn" onclick="closeTaskEditModal()">取消</button>
+        <button class="save" id="taskEditSaveGoalBtn" onclick="saveTaskGoalFromEdit()">保存</button>
+        <button class="save" id="taskEditRunBtn" onclick="runTaskFromEdit()">执行</button>
+      </div>
+    </div>
+    <!-- 缩放手柄：仅查看态显示（openTaskEditModal 控制），拖拽改弹窗宽高 -->
+    <div class="task-modal-resizer" id="taskModalResizer" style="display:none" title="拖拽调整大小"></div>
+  </div>
+</div>
+
+<!-- 设置模态框：左侧菜单（字体/命令/常用文本/文件/关于）+ 右侧内容区 + 底部靠右按钮 -->
 <div class="modal-overlay" id="settingsOverlay">
   <div class="modal settings-modal">
     <button type="button" class="settings-close" onclick="closeSettingsModal()" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
@@ -1073,7 +1298,7 @@
           <div class="field">
             <label>字体</label>
             <select id="setFontFamily" onchange="onFontSettingChange()"></select>
-            <div class="set-hint">终端是等宽栅格渲染，须用等宽字体；带中文字形的等宽字体（如等距更纱黑体）才能让中英文宽度一致。</div>
+            <div class="set-hint">全局字体：界面与终端统一跟随此处选择。终端是等宽栅格渲染，须用等宽字体；带中文字形的等宽字体（如等距更纱黑体）才能让中英文宽度一致。</div>
           </div>
           <div class="field" id="setCustomFontField" style="display:none">
             <label>自定义字体（CSS font-family，可含备选列表）</label>
@@ -1081,6 +1306,7 @@
           </div>
           <div class="field">
             <label>字号（10 ~ 24）</label>
+            <div class="set-hint">仅部分区域跟随：终端 / 日志 / 文件编辑器 / Git diff / 任务工作台的选项、目标与 agent 输出；其余界面元素保持固定字号。</div>
             <input type="number" id="setFontSize" min="10" max="24" step="1" oninput="updateSettingsPreview()">
           </div>
           <div class="field">
@@ -1142,6 +1368,7 @@
 
 <script>
 let projects = [];
+let tasks = [];
 let currentId = null;
 let ws = null;
 let editingId = null;
@@ -1295,35 +1522,47 @@ function restoreLogPaneLayout() {
 }
 
 // ---------- 项目卡片折叠 ----------
-// 每个项目的折叠状态持久化到 localStorage（key: projectCollapsed，value: { [projectId]: 1 }），
-// 重启后保持折叠/展开状态。
+// 折叠状态持久化到服务端 settings.json 的 projectCollapsed 字段（{ [projectId]: 1 }），
+// 与设置面板同通道（GET/PUT /api/settings）。渲染读内存 termSettings.projectCollapsed
+//（bootSettings 启动加载），写入=改内存 + PUT 落盘，重启/多窗口后保持。
+// localStorage['projectCollapsed'] 仅作旧版迁移读取（bootSettings），迁移后清除。
 function isProjectCollapsed(projectId) {
+  return !!(termSettings.projectCollapsed && termSettings.projectCollapsed[projectId]);
+}
+
+// 折叠 map 变更统一入口：改内存 → PUT 服务端 → 重渲染。
+// PUT 成功不提示（重渲染即反馈）；失败 toast 说明原因，内存已改、下次任意保存会重试落盘。
+async function saveProjectCollapsed() {
+  renderList();
   try {
-    const m = JSON.parse(localStorage.getItem('projectCollapsed') || '{}');
-    return !!m[projectId];
+    const res = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(termSettings),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.msg || 'HTTP ' + res.status);
   } catch (e) {
-    return false;
+    showToast('折叠状态保存失败: ' + (e.message || ''), 'error');
   }
 }
 
 function toggleProjectCollapsed(projectId) {
-  const m = JSON.parse(localStorage.getItem('projectCollapsed') || '{}');
+  const m = termSettings.projectCollapsed || (termSettings.projectCollapsed = {});
   if (m[projectId]) delete m[projectId]; else m[projectId] = 1;
-  localStorage.setItem('projectCollapsed', JSON.stringify(m));
-  renderList();
+  saveProjectCollapsed();
 }
 
-// 全部折叠/全部展开项目卡片：批量写入 projectCollapsed 后重渲染。折叠=所有项目置 1，展开=清空。
+// 全部折叠/全部展开项目卡片：批量更新折叠 map。折叠=所有项目置 1，展开=清空。
 function collapseAllProjects() {
   const m = {};
   for (const p of projects) m[p.id] = 1;
-  localStorage.setItem('projectCollapsed', JSON.stringify(m));
-  renderList();
+  termSettings.projectCollapsed = m;
+  saveProjectCollapsed();
 }
 
 function expandAllProjects() {
-  localStorage.setItem('projectCollapsed', '{}');
-  renderList();
+  termSettings.projectCollapsed = {};
+  saveProjectCollapsed();
 }
 
 // ---------- WebSocket ----------
@@ -1347,9 +1586,21 @@ function connectWS() {
       // PTY 输出流写到对应会话的 xterm 实例（claude / codex / cmd / pi 共用面板）；与栏是否激活无关，天然实时。
       const s = termSessions.get(msg.sessionId);
       if (s && s.term) s.term.write(msg.data);
+    } else if (msg.type === 'task-run-output') {
+      // 单轮任务流式输出：追加到运行弹窗（若开着）
+      appendTaskRunOutput(msg.taskId, msg.data);
+    } else if (msg.type === 'task-run-status') {
+      // 单轮任务状态推送：更新本地任务字段并重渲染看板；运行弹窗开着则同步状态区
+      const t = tasks.find((x) => x.id === msg.taskId);
+      if (t) {
+        t.status = msg.status;
+        if (msg.startedAt) t.startedAt = msg.startedAt;
+        if (msg.finishedAt) t.finishedAt = msg.finishedAt;
+        renderTaskBoard();
+      }
+      updateTaskRunModalStatus(msg.taskId, msg.status);
     } else if (msg.type === 'claude-session' || msg.type === 'codex-session' || msg.type === 'cmd-session' || msg.type === 'gitbash-session' || msg.type === 'pi-session') {
       if (msg.event === 'create') {
-        // sessionType 由后端 create 消息携带；未知时按 sessionId 前缀反推（c_/x_/m_）
         const stype = msg.sessionType || termTypeOf(msg.sessionId);
         createTerm(msg.sessionId, msg.projectId, msg.sessionNumber, stype);
         // 前端 termTypeOf 不认识的后端消息类型由 TERM_TYPE_META 决定行为，无需特判。
@@ -2433,12 +2684,15 @@ function renderList() {
     const actions = isFolder ? editBtn + delBtn : startBtn + stopBtn + restartBtn + cmdBtn + editBtn + delBtn;
     // 头像节点已随侧栏整体折叠移除；卡片折叠态：只保留一行名称 + 折叠按钮（变展开图标）
     const itemCollapsed = isProjectCollapsed(p.id);
+    // 折叠态标记：运行中显示绿点（badge 左侧）；有任意打开会话（claude/codex/pi/cmd 等）整卡变橙
+    const hasSessions = sessions.length > 0;
+    const runDot = itemCollapsed && running ? `<span class="run-dot"></span>` : '';
     const collapseBtn = `<button class="collapse-item-btn" title="${itemCollapsed ? '展开' : '折叠'}" onclick="event.stopPropagation(); toggleProjectCollapsed('${p.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>`;
     return `
-      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''}" data-project-id="${p.id}">
-        <div class="row">
+      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''} ${itemCollapsed && hasSessions ? 'has-sessions' : ''}" data-project-id="${p.id}">
+        <div class="row" oncontextmenu="event.preventDefault(); showProjectCardContextMenu(event)">
           <span class="vcs-logo" id="vcsLogo-${p.id}"></span><span class="name">${escapeHtml(p.name)}</span>
-          <span class="badge ${cls}">${typeLabel}</span>
+          ${runDot}<span class="badge ${cls}">${typeLabel}</span>
           ${collapseBtn}
         </div>
         ${meta}
@@ -2893,6 +3147,118 @@ async function execFileBtnContextAction(act) {
   openExplorer(projectId);
 }
 
+// ---------- 项目卡片头部行右键菜单 ----------
+// 右键卡片头部行（项目名+徽标）→ 菜单列出卡片全部功能（图标复用卡片按钮同款 SVG）：
+// 运行类/工具类/终端类/管理类。置灰规则与卡片按钮 disabled 条件一致：
+// Folder → 运行类全灰；未运行 → 停止/重启灰；运行中 → 启动灰。置灰项点击无效果。
+// 菜单复用 file-context-menu 深色样式，同 gitContextMenu/agentBtnContextMenu 模式
+//（mousedown 执行 + 点别处/ESC/失焦关闭）；打开时互斥收起其他浮层菜单。
+function showProjectCardContextMenu(e) {
+  hideProjectCardContextMenu();
+  closeShellMenu(); // 浮层菜单互斥：renderList 注释同款约束，避免悬空
+  hideFileBtnContextMenu();
+  hideAgentBtnContextMenu();
+  const row = e.currentTarget;
+  const item = row && row.closest ? row.closest('.project-item') : null;
+  const projectId = item && item.dataset.projectId;
+  const p = projects.find(x => x.id === projectId);
+  if (!p) return;
+  const menu = document.getElementById('projectCardContextMenu');
+  menu.dataset.projectId = p.id;
+  const isFolder = p.type === 'folder';
+  const running = !!p.running;
+  // 图标内联 SVG 复制自 renderList 各按钮同款；置灰 disabled 与卡片按钮条件一致
+  const menuBtn = (act, label, icon, disabled, cls) =>
+    `<button data-act="${act}"${cls ? ` class="${cls}"` : ''}${disabled ? ' disabled' : ''}>${icon}<span>${label}</span></button>`;
+  // 图标配色同卡片按钮（.project-actions button.start 等）：绿/红/橙/紫 + 终端类品牌橙
+  const C = {
+    start: 'm-start', stop: 'm-stop', restart: 'm-restart', command: 'm-command',
+    orange: 'm-orange',
+  };
+  const I = {
+    start: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+    restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    command: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    files: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>',
+    vcs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  };
+  menu.innerHTML = [
+    // 运行类：Folder 无启动命令，整组置灰（与卡片上 Folder 不渲染这组按钮一致）
+    menuBtn('start', '启动', I.start, isFolder || running, C.start),
+    menuBtn('stop', '停止', I.stop, isFolder || !running, C.stop),
+    menuBtn('restart', '重启', I.restart, isFolder || !running, C.restart),
+    menuBtn('command', '查看命令', I.command, isFolder, C.command),
+    '<div class="menu-sep"></div>',
+    // 工具类：图标品牌橙同卡片 term-new-row（文件目录/版本管理/logo 系列同色）
+    menuBtn('files', '文件目录', I.files, false, C.orange),
+    menuBtn('reveal', '在资源管理器中打开', I.files, false, C.orange),
+    menuBtn('vcs', '版本管理', I.vcs, false, C.orange),
+    '<div class="menu-sep"></div>',
+    // 终端类：logo 常量与卡片按钮同源，颜色同 term-new-row 品牌橙
+    menuBtn('cmd', 'cmd', CMD_LOGO, false, C.orange),
+    menuBtn('gitbash', 'Git Bash', GITBASH_LOGO, false, C.orange),
+    menuBtn('claude', 'claude', CLAUDE_LOGO, false, C.orange),
+    menuBtn('codex', 'codex', CODEX_LOGO, false, C.orange),
+    menuBtn('pi', 'pi', PI_LOGO, false, C.orange),
+    '<div class="menu-sep"></div>',
+    // 管理类：删除 danger 红同文件树菜单
+    menuBtn('edit', '编辑', I.edit, false),
+    menuBtn('delete', '删除', I.del, false, 'danger'),
+  ].join('');
+  // 定位：光标处，右/下缘超出视口则内收；先隐藏测得实际尺寸再钳制（shellMenu 同款）
+  menu.style.visibility = 'hidden';
+  menu.classList.add('show');
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const x = Math.min(e.clientX, window.innerWidth - mw - 8);
+  const y = Math.min(e.clientY, window.innerHeight - mh - 8);
+  menu.style.left = Math.max(8, x) + 'px';
+  menu.style.top = Math.max(8, y) + 'px';
+  menu.style.visibility = '';
+}
+function hideProjectCardContextMenu() {
+  document.getElementById('projectCardContextMenu').classList.remove('show');
+}
+(function () {
+  const menu = document.getElementById('projectCardContextMenu');
+  menu.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    execProjectCardContextAction(btn.dataset.act);
+  });
+  document.addEventListener('click', hideProjectCardContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('#projectCardContextMenu') && !e.target.closest('.project-item .row')) hideProjectCardContextMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideProjectCardContextMenu(); });
+  window.addEventListener('blur', hideProjectCardContextMenu);
+})();
+async function execProjectCardContextAction(act) {
+  const menu = document.getElementById('projectCardContextMenu');
+  const projectId = menu.dataset.projectId || '';
+  hideProjectCardContextMenu();
+  if (!projectId) return;
+  switch (act) {
+    case 'start': startProject(projectId); break;
+    case 'stop': stopProject(projectId); break;
+    case 'restart': restartProject(projectId); break;
+    case 'command': showCommand(projectId); break;
+    case 'files': openFileDrawer(projectId); break;
+    case 'reveal': openExplorer(projectId); break;
+    case 'vcs': openGitDrawer(projectId); break;
+    case 'cmd': newTermSession(projectId, 'cmd'); break;
+    case 'gitbash': newTermSession(projectId, 'gitbash'); break;
+    case 'claude': newTermSession(projectId, 'claude'); break;
+    case 'codex': newTermSession(projectId, 'codex'); break;
+    case 'pi': newTermSession(projectId, 'pi'); break;
+    case 'edit': openEditModal(projectId); break;
+    case 'delete': deleteProject(projectId); break;
+  }
+}
+
 // ---------- agent 按钮右键菜单 + 历史会话弹窗（claude/codex/pi 通用） ----------
 // 右键 agent 按钮 → 菜单「历史会话」→ 弹窗列出该 CLI 本地该项目的历史会话
 // （摘要 + 最后活动时间），点选后按 CLI 各自方式恢复（claude --resume /
@@ -3050,7 +3416,7 @@ const FONT_PRESETS = [
 const CUSTOM_FONT_KEY = '__custom__';
 // 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响
 const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
-const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, agentQuickTexts: null, cmdQuickTexts: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice() };
+const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, agentQuickTexts: null, cmdQuickTexts: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice(), projectCollapsed: {} };
 const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 24;
 
 // 命令列表 <-> 设置页 textarea 文本：每行一条「命令|中文说明」，说明可省略；空行忽略。
@@ -3103,6 +3469,10 @@ function normalizeLocalSettings(raw) {
     agentQuickTexts: sanitizeQuickTextList(src.agentQuickTexts),
     cmdQuickTexts: sanitizeQuickTextList(src.cmdQuickTexts),
     fileHideList,
+    // 折叠 map 归一：只保留真值条目（值统一 1），非法结构回空对象（与服务端 sanitizeProjectCollapsed 对齐）
+    projectCollapsed: (src.projectCollapsed && typeof src.projectCollapsed === 'object' && !Array.isArray(src.projectCollapsed))
+      ? Object.fromEntries(Object.entries(src.projectCollapsed).filter(([k, v]) => k && typeof k === 'string' && v).map(([k]) => [k, 1]))
+      : {},
   };
 }
 
@@ -3114,6 +3484,9 @@ let settingsReady = false; // bootSettings 完成后置 true；完成前打开�
 async function bootSettings() {
   let localLegacy = null;
   try { localLegacy = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch (e) { localLegacy = null; }
+  // 折叠状态旧数据：老版本存 localStorage['projectCollapsed']，迁移上服务端后清除
+  let legacyCollapsed = null;
+  try { legacyCollapsed = JSON.parse(localStorage.getItem('projectCollapsed')); } catch (e) { legacyCollapsed = null; }
   try {
     const res = await fetch('/api/settings');
     const data = await res.json();
@@ -3127,11 +3500,26 @@ async function bootSettings() {
         || localLegacy.claudeCommands || localLegacy.codexCommands || localLegacy.piCommands);
     const serverIsDefault = !Array.isArray(data.settings.fileHideList)
       || data.settings.fileHideList.join(',') === DEFAULT_FILE_HIDE_LIST.join(',');
-    if (hasLegacy && serverIsDefault) {
+    // 折叠迁移条件：本地有旧折叠数据且服务端 projectCollapsed 为空（未迁移过/新装）。
+    // 服务端已有折叠数据时以服务端为准，不迁移。与设置迁移相互独立判定，
+    // 任一命中即 PUT（老版本升级两路同时命中时合并为一次请求）。
+    const legacyCollapsedClean = (legacyCollapsed && typeof legacyCollapsed === 'object' && !Array.isArray(legacyCollapsed))
+      ? Object.fromEntries(Object.entries(legacyCollapsed).filter(([k, v]) => k && v).map(([k]) => [k, 1])) : null;
+    const hasLegacyCollapsed = legacyCollapsedClean && Object.keys(legacyCollapsedClean).length > 0;
+    const serverCollapsedEmpty = !serverSettings.projectCollapsed
+      || Object.keys(serverSettings.projectCollapsed).length === 0;
+    const doSettingsMigration = hasLegacy && serverIsDefault;
+    const doCollapseMigration = hasLegacyCollapsed && serverCollapsedEmpty;
+    if (doSettingsMigration || doCollapseMigration) {
       try {
+        // 载荷：设置迁移走整份旧配置；折叠字段以服务端当前值为基线回写，
+        // 仅折叠迁移生效时覆盖为旧本地 map——避免设置迁移载荷（normalize 后
+        // projectCollapsed 恒为 {}）把服务端已有折叠数据抹掉
+        const payload = normalizeLocalSettings(doSettingsMigration ? localLegacy : serverSettings);
+        payload.projectCollapsed = doCollapseMigration ? legacyCollapsedClean : (serverSettings.projectCollapsed || {});
         const put = await fetch('/api/settings', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizeLocalSettings(localLegacy)),
+          body: JSON.stringify(payload),
         });
         const putData = await put.json();
         if (putData.ok) serverSettings = putData.settings;
@@ -3139,6 +3527,7 @@ async function bootSettings() {
     }
     Object.assign(termSettings, normalizeLocalSettings(serverSettings));
     localStorage.removeItem(SETTINGS_KEY);
+    localStorage.removeItem('projectCollapsed');
     applyTermSettings();
   } catch (e) {
     // 服务端不可达：termSettings 保持默认值，等下次保存时重建
@@ -3156,45 +3545,18 @@ async function ensureSettingsReady() {
   ]);
 }
 
-// 热更新：日志面板（console-body 字体属性）+ 所有已有 xterm 会话。展示中的会话顺带 re-fit
-// 并同步 PTY 行列；隐藏会话（挂暂存区 display:none）fit 会算错，等显示到栏时再 fit。
+// 热更新：全局字体（CSS 变量随继承与 var() 引用铺满界面）+ 所有已有 xterm 会话。
+// 展示中的会话顺带 re-fit 并同步 PTY 行列；隐藏会话（挂暂存区 display:none）fit 会算错，
+// 等显示到栏时再 fit。
+// 注意：字号只通过 --app-font-size 影响显式引用它的区域（终端/日志/编辑器/diff/
+// 任务工作台的部分元素），其余界面元素保持固定字号档位——这是有意设计，不要扩散。
 function applyTermSettings() {
 
   const fontFamily = normalizeFontFamily(termSettings.fontFamily);
   const fontSize = termSettings.fontSize;
-  const body = document.querySelector('.console-body');
-  if (body) {
-    body.style.fontFamily = fontFamily;
-    body.style.fontSize = fontSize + 'px';
-  }
-  // 日志抽屉内容区（#logConsoleBody）：字体设置同样覆盖——分栏日志已从终端
-  // 剥离到这里，只改 .console-body 会让日志字体永远停在默认值
-  const logBody = document.getElementById('logConsoleBody');
-  if (logBody) {
-    logBody.style.fontFamily = fontFamily;
-    logBody.style.fontSize = fontSize + 'px';
-  }
-  // 文件编辑器跟随同一套终端字体设置。pre 是容器、code 才是文本元素——
-  // UA 样式表给 code 自带 font-family，字号上 code 还不吃继承（等宽元素默认 13px），
-  // 所以必须直接写 code，只写 pre 会让 gutter（继承 pre）与代码字体对不齐
-  const fvPre = document.getElementById('fileViewPre');
-  if (fvPre) {
-    fvPre.style.fontFamily = fontFamily;
-    fvPre.style.fontSize = fontSize + 'px';
-  }
-  const fvCode = document.getElementById('fileViewCode');
-  if (fvCode) {
-    fvCode.style.fontFamily = fontFamily;
-    fvCode.style.fontSize = fontSize + 'px';
-  }
-  // Git diff 左右对比弹窗也跟随同一套字体设置（模态框常驻 DOM，直接写即可）
-  ['gitDiffLeft', 'gitDiffRight'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.style.fontFamily = fontFamily;
-      el.style.fontSize = fontSize + 'px';
-    }
-  });
+  document.documentElement.style.setProperty('--app-font-family', fontFamily);
+  document.documentElement.style.setProperty('--app-font-size', fontSize + 'px');
+  // xterm 用 canvas 栅格渲染，不吃 CSS 继承，必须逐会话写 options
   termSessions.forEach((s) => {
     try { s.term.options.fontFamily = fontFamily; s.term.options.fontSize = fontSize; } catch (e) {}
   });
@@ -3236,7 +3598,7 @@ function closeSettingsModal() {
   document.getElementById('settingsOverlay').classList.remove('show');
 }
 
-// ---------- 设置模态框：左侧标签切换（字体 / 命令 / 关于） ----------
+// ---------- 设置模态框：左侧标签切换（字体 / 命令 / 常用文本 / 文件 / 关于） ----------
 // 关于页无可保存内容：保留底部按钮区（分隔线），仅隐藏里面的「保存」按钮。
 function switchSettingsTab(tab) {
   document.querySelectorAll('.settings-nav-item').forEach((b) => {
@@ -3632,6 +3994,8 @@ async function loadProjects() {
   const resp = await fetch('/api/projects');
   projects = await resp.json();
   renderList();
+  renderTaskProjectOptions(); // 新建任务表单的项目下拉跟随项目列表
+  renderTaskBoard(); // 项目就绪后重渲染看板：任务卡片的项目名从裸 id 换为名称
   renderPanes(); // 项目就绪后重渲染终端分栏：恢复/重命名的标题
   renderLogPanes(); // 日志抽屉分栏：标题 + 日志历史在此拉取
   updatePaneLogButtons();
@@ -3767,7 +4131,8 @@ function toggleSidePanel(panel) {
 // 持久化当前功能：'task' | 'cron'，缺省 = 工作台关。与抽屉面板（sideDrawerPanel）独立：
 // 点对应按钮展开抽屉 + 进工作台；再点仅收抽屉（工作台保持）；上方按钮统一先退出工作台。
 const WORKBENCH_KEY = 'workbench';
-let workbenchMode = localStorage.getItem(WORKBENCH_KEY) === 'cron' ? 'cron' : null;
+const savedWorkbench = localStorage.getItem(WORKBENCH_KEY);
+let workbenchMode = savedWorkbench === 'task' || savedWorkbench === 'cron' ? savedWorkbench : null;
 // 旧版只存 cronWorkbench='1'（当时仅定时任务一个功能），迁移为 cron 模式
 (function migrateWorkbenchKey() {
   if (!workbenchMode && localStorage.getItem('cronWorkbench') === '1') {
@@ -3780,6 +4145,9 @@ function applyWorkbenchState() {
   const el = document.getElementById('workbench');
   if (!el) return;
   el.classList.toggle('show', !!workbenchMode);
+  // 工作台按模式切换内容：task=任务看板，cron=建设中占位（看板列与占位互斥显示）
+  el.classList.toggle('mode-task', workbenchMode === 'task');
+  el.classList.toggle('mode-cron', workbenchMode === 'cron');
   // 高亮跟随工作台当前功能（指示终端区显示的是哪个工作台），与面板开态无关
   const taskBtn = document.getElementById('activityTaskBtn');
   if (taskBtn) taskBtn.classList.toggle('active', workbenchMode === 'task');
@@ -3825,6 +4193,668 @@ function closeWorkbenchDrawer(mode) {
 }
 function closeTaskDrawer() { closeWorkbenchDrawer('task'); }
 function closeCronDrawer() { closeWorkbenchDrawer('cron'); }
+
+// ---------- 任务看板（工作台 task 模式） ----------
+// 5 列固定看板：想法/待执行/任务中/待审核/已完成。列不可拖，卡片可跨列自由拖动
+// （原生 HTML5 DnD），拖完整表 POST /api/tasks/sync 同步列与顺序。
+// 卡片展示：首行=项目名徽标 · agent logo · 会话标题（claude ai-title，随宽度省略）
+// + 右上角状态圆点，目标（随宽度省略），创建时间；单击卡片（非拖动）打开编辑弹窗
+// （项目/agent/目标可改、可删除）。
+const TASK_COLUMNS = ['idea', 'todo', 'doing', 'review', 'done'];
+
+async function loadTasks() {
+  try {
+    const resp = await fetch('/api/tasks');
+    const data = await resp.json();
+    tasks = Array.isArray(data) ? data : [];
+  } catch (e) {
+    tasks = [];
+  }
+  renderTaskBoard();
+}
+
+function fmtTaskTime(iso) {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return '—';
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function taskCardHtml(t) {
+  const proj = projects.find((p) => p.id === t.projectId);
+  const projName = proj ? proj.name : t.projectId;
+  // 首行参考终端分栏标题：项目名徽标（badge 同款） · agent logo
+  const cls = proj ? `badge ${proj.type === 'node' ? 'node' : proj.type === 'springboot' ? 'springboot' : 'folder'}` : 'badge folder';
+  const logo = (TERM_TYPE_META[t.agent] || TERM_TYPE_META.claude).logo;
+  // 会话标题：claude 有 ai-title 时显示在 logo 后（随宽度省略）；codex/pi 无原生标题不显示
+  const sessionTitle = (t.sessionTitle || '').trim();
+  // 右上角状态圆点：未发起=idle 白，运行中=蓝闪烁，成功=绿，失败=红。
+  const status = t.status || 'idle';
+  // 右下角启动按钮：idle/完成/失败可再次发起；运行中禁用（旋转加载图标）。
+  // 成功/失败卡片在启动按钮上方补一行 meta：启动/完成时间。
+  const runIcon = status === 'agent-running'
+    ? '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>';
+  const runTitle = status === 'agent-running' ? '任务运行中' : (status === 'idle' ? '启动任务' : '再次启动（原会话续跑）');
+  const metaParts = [`创建 ${escapeHtml(fmtTaskTime(t.createdAt))}`];
+  // 第二行：启动/完成时间 + 用时（仅完成/失败卡片；运行中只显示启动时间）
+  if (t.startedAt) metaParts.push(`启动 ${escapeHtml(fmtTaskTime(t.startedAt))}`);
+  if (t.finishedAt) metaParts.push(`完成 ${escapeHtml(fmtTaskTime(t.finishedAt))}`);
+  const dur = t.startedAt && t.finishedAt ? Date.parse(t.finishedAt) - Date.parse(t.startedAt) : null;
+  let durText = '';
+  if (dur !== null && !Number.isNaN(dur) && dur >= 0) {
+    const sec = Math.floor(dur / 1000);
+    durText = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h`;
+  }
+  const line1 = metaParts[0];
+  const line2 = [metaParts.slice(1).join(' · '), durText].filter(Boolean).join(' · ');
+  return `<div class="task-card" draggable="true" data-task-id="${escapeHtml(t.id)}">
+    <div class="task-card-head">
+      <span class="${cls}">${escapeHtml(projName)}</span>
+      <span class="task-card-dot">·</span>
+      <span class="task-card-agent">${logo}</span>
+      ${sessionTitle ? `<span class="task-card-session-title" title="${escapeHtml(sessionTitle)}">${escapeHtml(sessionTitle)}</span>` : ''}
+      <span class="task-card-status ${status}" title="${status === 'agent-running' ? '运行中' : status === 'agent-success' ? '成功' : status === 'agent-fail' ? '失败' : '未发起'}"></span>
+    </div>
+    <div class="task-card-goal" title="${escapeHtml(t.goal)}">${escapeHtml(t.goal)}</div>
+    <div class="task-card-meta">${line1}</div>
+    ${line2 ? `<div class="task-card-meta">${line2}</div>` : ''}
+    <div class="task-card-foot">
+      <button type="button" class="task-card-run" title="${runTitle}" ${status === 'agent-running' ? 'disabled' : ''}>${runIcon}</button>
+    </div>
+  </div>`;
+}
+
+function renderTaskBoard() {
+  const wb = document.getElementById('workbench');
+  if (!wb) return;
+  for (const col of TASK_COLUMNS) {
+    const body = wb.querySelector(`.task-col[data-column="${col}"] .task-col-body`);
+    if (!body) continue;
+    const list = tasks.filter((t) => t.column === col);
+    body.innerHTML = list.map(taskCardHtml).join('');
+  }
+}
+
+// 卡片启动按钮：发起单轮任务（POST /api/tasks/:id/run）。
+// 成功不提示：卡片状态由 WS task-run-status 推送刷新（转运行中）；失败 toast 说明原因。
+// stopPropagation 已在模板 onclick 里处理（不触发卡片编辑弹窗）。
+async function runTaskFromCard(id) {
+  const t = tasks.find((x) => x.id === id);
+  if (!t || t.status === 'agent-running') return;
+  // 乐观更新：立即转运行中（按钮禁用 + 蓝闪），失败再回滚
+  t.status = 'agent-running';
+  t.startedAt = new Date().toISOString();
+  renderTaskBoard();
+  try {
+    const resp = await fetch(`/api/tasks/${encodeURIComponent(id)}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await resp.json();
+    if (!data.ok) {
+      showToast(data.msg || '启动任务失败', 'error');
+      await loadTasks(); // 回滚到服务端真实状态
+      return;
+    }
+  } catch (e) {
+    showToast('启动任务失败', 'error');
+    await loadTasks();
+  }
+}
+
+// 拖动结果整表同步：按当前 DOM 中每列卡片的顺序提交 {id, column} 全量列表。
+// 后端校验 ids 恰好覆盖现有任务集，失败弹 toast（成功不提示，看板重渲染即反馈）。
+async function syncTasksFromBoard() {
+  const wb = document.getElementById('workbench');
+  if (!wb) return;
+  const payload = [];
+  for (const col of TASK_COLUMNS) {
+    const colEl = wb.querySelector(`.task-col[data-column="${col}"]`);
+    if (!colEl) continue;
+    colEl.querySelectorAll('.task-card').forEach((card) => {
+      payload.push({ id: card.dataset.taskId, column: col });
+    });
+  }
+  try {
+    const resp = await fetch('/api/tasks/sync', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: payload }),
+    });
+    const data = await resp.json();
+    if (!data.ok) showToast(data.msg || '同步任务失败', 'error');
+    await loadTasks();
+  } catch (e) {
+    showToast('同步任务失败', 'error');
+    await loadTasks();
+  }
+}
+
+(function initTaskBoardDnd() {
+  const wb = document.getElementById('workbench');
+  if (!wb) return;
+  wb.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.task-card');
+    if (!card) return;
+    e.dataTransfer.setData('text/plain', card.dataset.taskId);
+    e.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dragging');
+  });
+  wb.addEventListener('dragend', (e) => {
+    const card = e.target.closest('.task-card');
+    if (card) card.classList.remove('dragging');
+    wb.querySelectorAll('.task-col.drag-over').forEach((el) => el.classList.remove('drag-over'));
+  });
+  wb.addEventListener('dragover', (e) => {
+    const col = e.target.closest('.task-col');
+    if (!col) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    wb.querySelectorAll('.task-col.drag-over').forEach((el) => { if (el !== col) el.classList.remove('drag-over'); });
+    col.classList.add('drag-over');
+    // 按鼠标 Y 位置实时移动卡片到目标位置（列末尾或某张卡片之间），松手即在位
+    const dragging = wb.querySelector('.task-card.dragging');
+    if (!dragging) return;
+    const body = col.querySelector('.task-col-body');
+    const after = [...body.querySelectorAll('.task-card:not(.dragging)')]
+      .find((c) => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
+    if (after) body.insertBefore(dragging, after);
+    else body.appendChild(dragging);
+  });
+  wb.addEventListener('dragleave', (e) => {
+    const col = e.target.closest('.task-col');
+    if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+  });
+  wb.addEventListener('drop', (e) => {
+    const col = e.target.closest('.task-col');
+    if (!col) return;
+    e.preventDefault();
+    col.classList.remove('drag-over');
+    // 位置在 dragover 中已实时落定，这里只提交同步
+    syncTasksFromBoard();
+  });
+})();
+
+// 新建任务（抽屉表单）：column 由所点按钮决定（idea/todo）。
+// 成功不提示：看板刷新即反馈；失败 toast 说明原因。
+async function createTask(column) {
+  const projectId = document.getElementById('taskProjectSel').dataset.value || '';
+  const agent = document.getElementById('taskAgentSel').dataset.value || 'claude';
+  const goal = document.getElementById('taskGoalInput').value.trim();
+  if (!projectId) { showToast('请选择项目', 'warning'); return; }
+  if (!goal) { showToast('请输入目标', 'warning'); return; }
+  try {
+    const resp = await fetch('/api/tasks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, agent, goal, column }),
+    });
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '创建任务失败', 'error'); return; }
+    document.getElementById('taskGoalInput').value = '';
+    tasks.push(data.task);
+    renderTaskBoard();
+  } catch (e) {
+    showToast('创建任务失败', 'error');
+  }
+}
+
+// 抽屉项目下拉选项跟随 projects 刷新（保留当前选择）
+function renderTaskProjectOptions() {
+  const sel = document.getElementById('taskProjectSel');
+  if (!sel) return;
+  renderTaskSelect(sel, taskProjectSelectItems(), sel.dataset.value || '');
+}
+
+// 弹窗项目/agent 下拉选项：结构同抽屉表单，独立实例（id 前缀 taskEdit）
+function renderTaskEditProjectOptions() {
+  const sel = document.getElementById('taskEditProjectSel');
+  if (!sel) return;
+  renderTaskSelect(sel, taskProjectSelectItems(), sel.dataset.value || '');
+}
+
+function renderTaskEditAgentOptions() {
+  const sel = document.getElementById('taskEditAgentSel');
+  if (!sel) return;
+  renderTaskSelect(sel, taskAgentSelectItems(), sel.dataset.value || 'claude');
+}
+
+// ---------- 任务编辑/查看弹窗（点看板卡片打开） ----------
+// 未发起（idle）= 编辑态：项目/agent/目标均可改（PUT /api/tasks/:id），可删除。
+// 运行中 = 只读查看态：项目/agent/目标只读 + 输出区实时流式（WS task-run-output）。
+// 完成/失败 = 查看态 + 输出回放 + 新目标输入，可再次发起（原会话续跑）。
+// 成功不提示：关弹窗 + 看板刷新即反馈；失败 toast 说明原因。
+let taskEditId = null;
+
+// 输出区自动滚动到底（有新输出时）
+function scrollTaskOutputToBottom() {
+  const out = document.getElementById('taskEditOutput');
+  if (out) out.scrollTop = out.scrollHeight;
+}
+
+// WS task-run-output：弹窗开着且是当前任务则追加输出
+function appendTaskRunOutput(taskId, text) {
+  if (taskEditId !== taskId) return;
+  const out = document.getElementById('taskEditOutput');
+  if (!out) return;
+  const empty = out.querySelector('.task-run-output-empty');
+  if (empty) empty.remove();
+  out.appendChild(document.createTextNode(text));
+  scrollTaskOutputToBottom();
+}
+
+// WS task-run-status：弹窗开着且是当前任务则整体切态（运行中→完成时按钮恢复等）
+function updateTaskRunModalStatus(taskId, status) {
+  if (taskEditId !== taskId) return;
+  const t = tasks.find((x) => x.id === taskId);
+  if (t) openTaskEditModal(taskId); // 按最新任务字段整体重开（简单可靠）
+}
+
+async function openTaskEditModal(id) {
+  const t = tasks.find((x) => x.id === id);
+  if (!t) return;
+  taskEditId = id;
+  const overlay = document.getElementById('taskEditOverlay');
+  const running = t.status === 'agent-running';
+  const started = !!t.status && t.status !== 'idle'; // 布尔强转：undefined 时 toggle(name, undefined) 视为无 force 翻转，会把加宽类加上
+  // 标题统一「任务面板」（状态由首行卡片头的状态圆点与 meta 行表达）
+  document.getElementById('taskEditTitle').textContent = '任务面板';
+
+  // 编辑态字段显隐
+  document.getElementById('taskEditProjectField').style.display = started ? 'none' : '';
+  document.getElementById('taskEditAgentField').style.display = started ? 'none' : '';
+  document.getElementById('taskEditGoalField').style.display = started ? 'none' : '';
+  document.getElementById('taskEditActionsEdit').style.display = started ? 'none' : '';
+  document.getElementById('taskEditActionsView').style.display = started ? '' : 'none';
+  // 弹窗尺寸：查看态加宽（task-modal-wide）+ 缩放手柄；编辑态恢复默认 480px 并清掉拖拽 inline 尺寸
+  const modal = overlay.querySelector('.modal');
+  const resizer = document.getElementById('taskModalResizer');
+  modal.classList.toggle('task-modal-wide', started);
+  resizer.style.display = started ? '' : 'none';
+  if (started) {
+    // 恢复上次拖拽尺寸（持久化于 localStorage；无记录用 CSS 默认 960x680）
+    try {
+      const saved = JSON.parse(localStorage.getItem('taskModalSize') || 'null');
+      if (saved && saved.w > 0 && saved.h > 0) {
+        modal.style.width = saved.w + 'px';
+        modal.style.height = saved.h + 'px';
+      }
+    } catch (e) {}
+  } else {
+    modal.style.width = '';
+    modal.style.height = '';
+  }
+  // 拖动位置恢复：打开即回到上次拖到的位置（无记录保持居中）；关闭时清空（见 closeTaskEditModal）
+  try {
+    const savedPos = JSON.parse(localStorage.getItem('taskModalPos') || 'null');
+    modal.style.transform = savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)
+      ? `translate(${savedPos.x}px, ${savedPos.y}px)` : '';
+  } catch (e) {
+    modal.style.transform = '';
+  }
+  // 查看/续跑态第一行=卡片头：项目徽标 · 会话标题 · agent logo（复用卡片样式，无状态圆点）
+  document.getElementById('taskEditReadonlyField').style.display = started ? '' : 'none';
+  const proj = projects.find((p) => p.id === t.projectId);
+  const projName = proj ? proj.name : t.projectId;
+  const projCls = proj ? (proj.type === 'node' ? 'node' : proj.type === 'springboot' ? 'springboot' : 'folder') : 'folder';
+  const logo = (TERM_TYPE_META[t.agent] || TERM_TYPE_META.claude).logo;
+  const sessionTitle = (t.sessionTitle || '').trim();
+  document.getElementById('taskEditReadonly').innerHTML =
+    `<span class="badge ${projCls}">${escapeHtml(projName)}</span>` +
+    `<span class="task-card-dot">·</span>` +
+    `<span class="task-card-agent">${logo}</span>` +
+    (sessionTitle ? `<span class="task-card-session-title" title="${escapeHtml(sessionTitle)}">${escapeHtml(sessionTitle)}</span>` : '');
+  // 第二行=创建时间（输出前）；meta 行=启动/完成/用时（输出后，卡片最后一行同款）
+  const createdEl = document.getElementById('taskEditModalCreated');
+  const metaEl = document.getElementById('taskEditModalMeta');
+  createdEl.style.display = started ? '' : 'none';
+  metaEl.style.display = started ? '' : 'none';
+  if (started) {
+    const dur = t.startedAt && t.finishedAt ? Date.parse(t.finishedAt) - Date.parse(t.startedAt) : null;
+    let durText = '';
+    if (dur !== null && !Number.isNaN(dur) && dur >= 0) {
+      const sec = Math.floor(dur / 1000);
+      durText = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h`;
+    }
+    createdEl.innerHTML = `<div class="task-card-meta">创建 ${escapeHtml(fmtTaskTime(t.createdAt))}</div>`;
+    const metaLine = [`启动 ${escapeHtml(fmtTaskTime(t.startedAt || ''))}`];
+    if (t.finishedAt) metaLine.push(`完成 ${escapeHtml(fmtTaskTime(t.finishedAt))}`);
+    if (durText) metaLine.push(durText);
+    metaEl.innerHTML = `<div class="task-card-meta">${metaLine.join(' · ')}</div>`;
+  }
+  // 新目标输入：仅完成/失败态显示（运行中无）；原目标不再显示
+  const newGoalField = document.getElementById('taskEditNewGoalField');
+  const newGoalInput = document.getElementById('taskEditNewGoal');
+  newGoalField.style.display = (started && !running) ? '' : 'none';
+  newGoalInput.value = '';
+  // 按钮行：运行中只取消；完成/失败=取消/保存/执行
+  document.getElementById('taskEditSaveGoalBtn').style.display = (started && !running) ? '' : 'none';
+  document.getElementById('taskEditRunBtn').style.display = (started && !running) ? '' : 'none';
+  // 输出区：发起过就显示，拉历史输出回放
+  const outField = document.getElementById('taskEditOutputField');
+  outField.style.display = started ? '' : 'none';
+  const out = document.getElementById('taskEditOutput');
+  out.innerHTML = '<div class="task-run-output-empty">加载中…</div>';
+  if (started) {
+    try {
+      const resp = await fetch(`/api/tasks/${encodeURIComponent(id)}/output`);
+      const data = await resp.json();
+      if (taskEditId === id) { // 弹窗可能已切到别的任务
+        out.textContent = data.output || '';
+        out.innerHTML = data.output ? escapeHtml(data.output) : '<div class="task-run-output-empty">暂无输出</div>';
+        scrollTaskOutputToBottom();
+      }
+    } catch (e) {
+      out.innerHTML = '<div class="task-run-output-empty">输出加载失败</div>';
+    }
+  }
+
+  if (!started) {
+    renderTaskEditProjectOptions();
+    renderTaskEditAgentOptions();
+    document.getElementById('taskEditProjectSel').dataset.value = t.projectId;
+    renderTaskEditProjectOptions();
+    document.getElementById('taskEditAgentSel').dataset.value = t.agent;
+    renderTaskEditAgentOptions();
+    document.getElementById('taskEditGoal').value = t.goal;
+  }
+  closeAllTaskSelects();
+  overlay.classList.add('show');
+}
+
+// 弹窗「保存」按钮（查看态）：只保存新目标（PUT goal），不发起执行。
+// 成功不提示：弹窗重开（输出/meta 随最新任务字段刷新）即反馈；失败 toast 说明原因。
+async function saveTaskGoalFromEdit() {
+  if (!taskEditId) return;
+  const newGoal = document.getElementById('taskEditNewGoal').value.trim();
+  if (!newGoal) { showToast('请输入新目标', 'warning'); return; }
+  try {
+    const resp = await fetch(`/api/tasks/${encodeURIComponent(taskEditId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal: newGoal }),
+    });
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '保存目标失败', 'error'); return; }
+    await loadTasks();
+    openTaskEditModal(taskEditId); // 按最新任务字段重开（goal 已更新）
+  } catch (e) {
+    showToast('保存目标失败', 'error');
+  }
+}
+
+// 弹窗内「执行」按钮（完成/失败态）：校验新目标非空 → PUT goal → POST run（原会话续跑）
+async function runTaskFromEdit() {
+  if (!taskEditId) return;
+  const newGoal = document.getElementById('taskEditNewGoal').value.trim();
+  if (!newGoal) { showToast('请输入新目标', 'warning'); return; }
+  try {
+    const resp = await fetch(`/api/tasks/${encodeURIComponent(taskEditId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal: newGoal }),
+    });
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '保存目标失败', 'error'); return; }
+    await loadTasks();
+    await runTaskFromCard(taskEditId);
+  } catch (e) {
+    showToast('启动任务失败', 'error');
+  }
+}
+
+function closeTaskEditModal() {
+  taskEditId = null;
+  closeAllTaskSelects();
+  document.getElementById('taskEditOverlay').classList.remove('show');
+  // 清空拖动位移：inline transform 基于「当次打开的居中位置」，保留会在窗口尺寸变化后基准漂移
+  document.querySelector('#taskEditOverlay .modal').style.transform = '';
+}
+
+// ---------- 任务弹窗缩放（查看态右下角手柄，pointer 拖拽改宽高） ----------
+// 与侧栏抽屉拖宽同模式（pointer capture）；尺寸实时写 inline 宽高，松手持久化
+// localStorage（taskModalSize）。下限 480x320（不小于编辑态宽度），上限视口 92vw/92vh。
+(function initTaskModalResize() {
+  const modal = document.querySelector('#taskEditOverlay .modal');
+  const resizer = document.getElementById('taskModalResizer');
+  if (!modal || !resizer) return;
+  let dragging = null; // { startX, startY, startW, startH }
+  resizer.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    dragging = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: parseFloat(modal.style.width) || parseFloat(getComputedStyle(modal).width) || 960,
+      startH: parseFloat(modal.style.height) || parseFloat(getComputedStyle(modal).height) || 680,
+    };
+    try { resizer.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  resizer.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    // 按拖拽方向钳制：放大不超过 92vw/92vh（起始尺寸本身可能已超小视口的 92%，
+    // 此时向右下拖不允许再大）；缩小不低于 480x320。
+    const dw = e.clientX - dragging.startX;
+    const dh = e.clientY - dragging.startY;
+    const maxW = window.innerWidth * 0.92;
+    const maxH = window.innerHeight * 0.92;
+    const w = dw >= 0 ? Math.min(maxW, dragging.startW + dw) : Math.max(480, dragging.startW + dw);
+    const h = dh >= 0 ? Math.min(maxH, dragging.startH + dh) : Math.max(320, dragging.startH + dh);
+    modal.style.width = w + 'px';
+    modal.style.height = h + 'px';
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = null;
+    localStorage.setItem('taskModalSize', JSON.stringify({
+      w: parseFloat(modal.style.width) || 960,
+      h: parseFloat(modal.style.height) || 680,
+    }));
+  };
+  resizer.addEventListener('pointerup', endDrag);
+  resizer.addEventListener('pointercancel', endDrag);
+})();
+
+// ---------- 任务弹窗拖动位置（按住标题 h2 移动弹窗） ----------
+// 与缩放手柄同模式（pointer capture）：位移写 inline transform（不动 overlay 居中布局），
+// 松手持久化 localStorage（taskModalPos）；openTaskEditModal 打开时恢复、关闭时清空
+// （inline 位移基于「当次打开的居中位置」，清空避免窗口尺寸变化后基准漂移）。
+// 钳制（clampTaskModalPos，纯函数便于单测）：竖向标题栏始终在视口内（top∈[0, vh-48]），
+// 横向至少 48px 可见。rect 为含当前位移的弹窗矩形（cur 用于还原未位移基准）；
+// jsdom 等无布局环境 rect.width=0，拖动时跳过钳制（钳制本身直测纯函数）。
+function clampTaskModalPos(x, y, cur, rect, vw, vh) {
+  const baseLeft = rect.left - cur.x;
+  const baseTop = rect.top - cur.y;
+  return {
+    x: Math.min(vw - 48 - baseLeft, Math.max(48 - rect.width - baseLeft, x)),
+    y: Math.min(vh - 48 - baseTop, Math.max(-baseTop, y)),
+  };
+}
+(function initTaskModalDrag() {
+  const modal = document.querySelector('#taskEditOverlay .modal');
+  const titleBar = document.getElementById('taskEditTitle');
+  if (!modal || !titleBar) return;
+  let dragging = null; // { pointerId, startX, startY, baseX, baseY }
+  const curPos = () => {
+    const m = modal.style.transform.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
+    return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : { x: 0, y: 0 };
+  };
+  titleBar.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const cur = curPos();
+    dragging = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, baseX: cur.x, baseY: cur.y };
+    try { titleBar.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  titleBar.addEventListener('pointermove', (e) => {
+    if (!dragging || e.pointerId !== dragging.pointerId) return;
+    let x = dragging.baseX + (e.clientX - dragging.startX);
+    let y = dragging.baseY + (e.clientY - dragging.startY);
+    const rect = modal.getBoundingClientRect();
+    if (rect.width > 0) { // 无布局环境（jsdom）跳过钳制
+      ({ x, y } = clampTaskModalPos(x, y, curPos(), rect, window.innerWidth, window.innerHeight));
+    }
+    modal.style.transform = `translate(${x}px, ${y}px)`;
+  });
+  const endDrag = (e) => {
+    if (!dragging || (e && e.pointerId !== undefined && e.pointerId !== dragging.pointerId)) return;
+    dragging = null;
+    const cur = curPos();
+    if (cur.x || cur.y) localStorage.setItem('taskModalPos', JSON.stringify(cur));
+  };
+  titleBar.addEventListener('pointerup', endDrag);
+  titleBar.addEventListener('pointercancel', endDrag);
+})();
+
+async function saveTaskEdit() {
+  if (!taskEditId) return;
+  const projectId = document.getElementById('taskEditProjectSel').dataset.value || '';
+  const agent = document.getElementById('taskEditAgentSel').dataset.value || 'claude';
+  const goal = document.getElementById('taskEditGoal').value.trim();
+  if (!projectId) { showToast('请选择项目', 'warning'); return; }
+  if (!goal) { showToast('请输入目标', 'warning'); return; }
+  try {
+    const resp = await fetch(`/api/tasks/${encodeURIComponent(taskEditId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, agent, goal }),
+    });
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '保存任务失败', 'error'); return; }
+    closeTaskEditModal();
+    await loadTasks();
+  } catch (e) {
+    showToast('保存任务失败', 'error');
+  }
+}
+
+async function deleteTaskFromEdit() {
+  if (!taskEditId) return;
+  const t = tasks.find((x) => x.id === taskEditId);
+  const ok = await showConfirm(`确认删除该任务？\n目标：${t ? t.goal : taskEditId}`, '删除任务');
+  if (!ok) return;
+  try {
+    const resp = await fetch(`/api/tasks/${encodeURIComponent(taskEditId)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!data.ok) { showToast(data.msg || '删除任务失败', 'error'); return; }
+    closeTaskEditModal();
+    await loadTasks();
+  } catch (e) {
+    showToast('删除任务失败', 'error');
+  }
+}
+
+// 单击卡片打开编辑弹窗：与拖拽共存——mousedown 记录起点，click 时位移超过阈值视为拖动不触发。
+// 卡片右下角启动按钮走事件委托（优先于编辑弹窗，stopPropagation 阻断）。
+(function initTaskCardClick() {
+  let downPos = null;
+  const wb = document.getElementById('workbench');
+  if (!wb) return;
+  wb.addEventListener('mousedown', (e) => {
+    downPos = e.target.closest('.task-card') ? { x: e.clientX, y: e.clientY } : null;
+  });
+  wb.addEventListener('click', (e) => {
+    const runBtn = e.target.closest('.task-card-run');
+    if (runBtn && !runBtn.disabled) {
+      e.stopPropagation();
+      const card = runBtn.closest('.task-card');
+      if (card) runTaskFromCard(card.dataset.taskId);
+      return;
+    }
+    const card = e.target.closest('.task-card');
+    if (!card) return;
+    // 拖动松手会触发 click：位移明显（>5px）视为拖动，不开弹窗
+    if (downPos && (Math.abs(e.clientX - downPos.x) > 5 || Math.abs(e.clientY - downPos.y) > 5)) return;
+    openTaskEditModal(card.dataset.taskId);
+  });
+})();
+
+// 自绘下拉（原生 option 渲染不了徽标/logo）：
+//   items: [{ value, html, head }]；html = 条目内富内容，head = 闭合态富内容（未选时显示「请选择」）。
+//   选中值存容器 dataset.value。列表不内联在 .task-select 里，而是点开时挂到 body 上
+//   fixed 定位贴 toggle 下方——抽屉 body 是 overflow:auto，内联 absolute 列表会被裁剪不可见。
+function renderTaskSelect(sel, items, value) {
+  sel.dataset.value = value;
+  sel.dataset.items = JSON.stringify(items);
+  const cur = items.find((it) => it.value === value);
+  sel.innerHTML =
+    `<button type="button" class="task-select-toggle"><span class="task-select-value">${cur ? cur.head : '请选择'}</span><span class="task-select-arrow">▾</span></button>`;
+}
+
+// 打开下拉：把列表挂到 body（fixed），按 toggle 位置定位；空间不足时向上弹
+function openTaskSelectList(sel) {
+  closeAllTaskSelects();
+  const items = JSON.parse(sel.dataset.items || '[]');
+  const value = sel.dataset.value || '';
+  const pop = document.createElement('div');
+  pop.className = 'task-select-popover';
+  pop.id = 'taskSelectPopover';
+  pop.dataset.for = sel.id;
+  pop.innerHTML = items.map((it) =>
+    `<div class="task-select-item${it.value === value ? ' selected' : ''}" data-value="${escapeHtml(it.value)}">${it.html}</div>`
+  ).join('');
+  document.body.appendChild(pop);
+  const tr = sel.querySelector('.task-select-toggle').getBoundingClientRect();
+  pop.style.visibility = 'hidden';
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = tr.left, y = tr.bottom + 4;
+  if (x + pw > window.innerWidth - 8) x = window.innerWidth - 8 - pw;
+  if (y + ph > window.innerHeight - 8) y = tr.top - ph - 4;
+  pop.style.left = Math.max(8, x) + 'px';
+  pop.style.top = Math.max(8, y) + 'px';
+  pop.style.width = tr.width + 'px';
+  pop.style.visibility = '';
+  sel.classList.add('open');
+}
+
+function closeAllTaskSelects() {
+  document.querySelectorAll('.task-select.open').forEach((el) => el.classList.remove('open'));
+  const pop = document.getElementById('taskSelectPopover');
+  if (pop) pop.remove();
+}
+
+(function initTaskSelects() {
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('taskSelectPopover');
+    const inPop = pop && pop.contains(e.target);
+    const sel = e.target.closest('.task-select');
+    if (!sel && !inPop) { closeAllTaskSelects(); return; }
+    if (inPop) {
+      // 点击弹出列表条目：值写回所属 .task-select 并重渲染闭合态
+      const item = e.target.closest('.task-select-item');
+      const owner = pop && document.getElementById(pop.dataset.for);
+      closeAllTaskSelects();
+      if (!item || !owner) return;
+      owner.dataset.value = item.dataset.value;
+      if (owner.id === 'taskProjectSel') renderTaskProjectOptions();
+      else if (owner.id === 'taskAgentSel') renderTaskAgentOptions();
+      else if (owner.id === 'taskEditProjectSel') renderTaskEditProjectOptions();
+      else if (owner.id === 'taskEditAgentSel') renderTaskEditAgentOptions();
+      return;
+    }
+    if (e.target.closest('.task-select-toggle')) {
+      if (sel.classList.contains('open')) closeAllTaskSelects();
+      else openTaskSelectList(sel);
+    }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllTaskSelects(); });
+})();
+
+// agent 下拉选项：固定三项（claude/codex/pi），条目与闭合态均带各自 logo
+function taskAgentSelectItems() {
+  return [
+    { value: 'claude', head: `${CLAUDE_LOGO}<span>claude</span>`, html: `${CLAUDE_LOGO}<span class="task-select-item-name">claude</span>` },
+    { value: 'codex', head: `${CODEX_LOGO}<span>codex</span>`, html: `${CODEX_LOGO}<span class="task-select-item-name">codex</span>` },
+    { value: 'pi', head: `${PI_LOGO}<span>pi</span>`, html: `${PI_LOGO}<span class="task-select-item-name">pi</span>` },
+  ];
+}
+
+function renderTaskAgentOptions() {
+  const sel = document.getElementById('taskAgentSel');
+  if (!sel) return;
+  renderTaskSelect(sel, taskAgentSelectItems(), sel.dataset.value || 'claude');
+}
+
+// 项目下拉选项：条目与闭合态均为「项目名徽标 · 类型徽标」，两个徽标同款样式（按项目类型配色，
+// 与项目卡片/分栏标题一致）；项目名徽标可截断。
+function taskProjectSelectItems() {
+  return projects.map((p) => {
+    const cls = p.type === 'node' ? 'node' : (p.type === 'springboot' ? 'springboot' : 'folder');
+    const typeLabel = p.type === 'node' ? 'Node' : (p.type === 'springboot' ? 'SpringBoot' : 'Folder');
+    const rich = `<span class="badge ${cls} name-trunc">${escapeHtml(p.name)}</span><span class="task-select-dot">·</span><span class="badge ${cls}">${typeLabel}</span>`;
+    return { value: p.id, head: rich, html: rich };
+  });
+}
+
+// 初始化 agent 下拉（项目下拉由 loadProjects → renderTaskProjectOptions 填充）
+renderTaskAgentOptions();
 
 // ---------- 日志抽屉折叠/调高 ----------
 // 折叠态 + 展开高度均持久化到 localStorage；默认收起。
@@ -4540,7 +5570,7 @@ function promptNewEntryName(isDir) {
     ov.innerHTML = `<div class="modal confirm-modal">
       <h2>${isDir ? '新建文件夹' : '新建文件'}</h2>
       <p style="margin-bottom:8px">名称：</p>
-      <input type="text" id="fvNewName" style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:13px" />
+      <input type="text" id="fvNewName" style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:14px" />
       <div class="modal-actions">
         <button class="cancel" id="fvNewCancel">取消</button>
         <button class="save" id="fvNewOk">创建</button>
@@ -4854,7 +5884,7 @@ async function loadGitStatus() {
       if (meta.noSvn) {
         gitRepoKind = 'svn';
         renderGitDrawerTitle();
-        body.innerHTML = `<div class="git-not-repo">该目录是 SVN 工作副本，但本机没有可用的 svn 命令行。<br/><span style="font-size:11px">请安装 TortoiseSVN（勾选 command line client tools）或 Apache Subversion 命令行工具后重启本应用。</span></div>`;
+        body.innerHTML = `<div class="git-not-repo">该目录是 SVN 工作副本，但本机没有可用的 svn 命令行。<br/><span style="font-size:12px">请安装 TortoiseSVN（勾选 command line client tools）或 Apache Subversion 命令行工具后重启本应用。</span></div>`;
         return;
       }
       // meta.notRepo：既非 git 也非 svn，落到下方「不是仓库」占位
@@ -5917,8 +6947,8 @@ function promptRemoteUrlInput(curUrl) {
       <h2>${curUrl ? '修改远端地址' : '连接远端仓库'}</h2>
       <p style="margin-bottom:8px">远端仓库 URL：</p>
       <input type="text" id="gitRemoteUrlInput" placeholder="例如：https://github.com/user/repo.git" value="${curUrl ? escapeHtml(curUrl) : ''}"
-        style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:13px" />
-      <p style="margin:8px 0 0;font-size:11px;color:#86909c;line-height:1.5">保存后即可推送/拉取；若 URL 中包含账号凭证，将明文写入 .git/config。</p>
+        style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #3a3c3f;background:#1d1f21;color:#e3e3e3;border-radius:6px;font-size:14px" />
+      <p style="margin:8px 0 0;font-size:12px;color:#86909c;line-height:1.5">保存后即可推送/拉取；若 URL 中包含账号凭证，将明文写入 .git/config。</p>
       <div class="modal-actions">
         <button class="cancel" id="gitRemoteCancel">取消</button>
         <button class="save" id="gitRemoteOk">保存</button>
@@ -6322,7 +7352,7 @@ function renderSvnSkeleton() {
   parts.push(`<div class="git-branch-row">
     <span class="git-drawer-spin" id="svnUrlSpin" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></span>
     <span class="git-branch-name" style="cursor:default" title="${escapeHtml(url || '')}">${ICON_GIT_BRANCH}${escapeHtml(url ? url.replace(/^https?:\/\//, '').slice(-40) : 'SVN 工作副本')}</span>
-    <span style="color:#86909c;font-size:11px;flex-shrink:0">r${escapeHtml(rev || '?')}</span>
+    <span style="color:#86909c;font-size:12px;flex-shrink:0">r${escapeHtml(rev || '?')}</span>
   </div>`);
   parts.push(`<div class="git-net-row">
     <button data-net="update" onclick="svnUpdate()" disabled>更新</button>
@@ -6500,7 +7530,7 @@ function renderSvnBody() {
   parts.push(`<div class="git-branch-row">
     <span class="git-drawer-spin" id="svnUrlSpin" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></span>
     <span class="git-branch-name" style="cursor:default" title="${escapeHtml(url || '')}">${ICON_GIT_BRANCH}${escapeHtml(url ? url.replace(/^https?:\/\//, '').slice(-40) : 'SVN 工作副本')}</span>
-    <span style="color:#86909c;font-size:11px;flex-shrink:0">r${escapeHtml(rev || '?')}</span>
+    <span style="color:#86909c;font-size:12px;flex-shrink:0">r${escapeHtml(rev || '?')}</span>
   </div>`);
   // update 行：svn update 拉取远端最新（提交即推送，无需推送按钮）。
   // behind 徽标（本地未更新的提交条数）来自后台检测，初始不渲染
@@ -7798,6 +8828,7 @@ bootSettings();
 // 把已持久化的项目绑定误判为"项目已删除"而清空，导致刷新后文件/Git 面板空白。
 applySideDrawerState();
 applyWorkbenchState(); // 还原工作台态（刷新后保持任务/定时任务模式）
+loadTasks(); // 任务看板数据（工作台 task 模式渲染用）
 // 自绘标题栏：浏览器/壳内都显示品牌区；窗口控制按钮（.tb-btns）仅 Tauri 壳内
 // （window.__TAURI__ 注入）激活——加 .tauri class 后才显示，浏览器没有窗口可操作。
 // 版本号从后端取（与 package.json 单一来源）。
@@ -7926,7 +8957,7 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
   const tip = document.createElement('div');
   tip.id = 'globalTip';
   tip.style.cssText = 'position:fixed;z-index:99999;max-width:420px;padding:4px 8px;background:#1c1e21;color:#d5d7db;'
-    + 'border:1px solid #3a3c3f;border-radius:5px;font-size:11px;line-height:1.5;pointer-events:none;'
+    + 'border:1px solid #3a3c3f;border-radius:5px;font-size:12px;line-height:1.5;pointer-events:none;'
     + 'white-space:pre-wrap;word-break:break-all;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);';
   document.body.appendChild(tip);
   let cur = null;

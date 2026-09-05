@@ -26,6 +26,10 @@ diag5.tmp.js
 projects.json
 # 本地运行时数据（设置面板配置：字体/命令/文件黑名单）
 settings.json
+# 本地运行时数据（任务看板：想法/待执行/任务中/待审核/已完成）
+tasks.json
+# 本地运行时数据（任务运行日志 task-outputs/<taskId>.log）
+task-outputs/
 
 # 本地草稿 / 临时复现脚本（不随源码入库）
 .scratch/
