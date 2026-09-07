@@ -1,6 +1,6 @@
 # PolyTaskPanel
 
-> Windows 本地的多元任务面板：用 Web 界面管理 SpringBoot / Node 项目，一键启动、实时日志、停止杀进程树，并内置 Claude Code / Codex / pi 交互式终端。
+> 多元任务面板：可多开 Claude Code / Codex / pi 终端， 多项目多任务Vibe Coding工具。
 
 版本：**2.4.0**
 
