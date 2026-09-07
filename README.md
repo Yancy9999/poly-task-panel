@@ -25,18 +25,20 @@
 
 ## 功能特性
 
-- **项目管理**：支持 SpringBoot、Node、Folder 三种类型；新增 / 编辑 / 删除 / 拖拽排序，数据持久化到 `projects.json`。
+- **项目管理**：支持 SpringBoot、Node、Folder 三种类型；新增 / 编辑 / 删除 / 拖拽排序，数据持久化到 `projects.json`。点击项目卡片可激活该项目——有终端窗口时激活其第一栏，无窗口时取消分栏激活（卡片左缘橙色竖线指示当前激活项）。
 - **一键启动 / 停止 / 重启**：停止时递归 `taskkill /T` 杀掉整个进程树，不留孤儿进程占端口。
 - **实时日志**：宿主项目日志走 ANSI→HTML 渲染，支持清空日志。
 - **按类型启动**：
   - **SpringBoot**：`mvn spring-boot:run -pl <module>`，可勾选「先编译依赖模块」（`mvn compile -Dmaven.test.skip=true -pl <module> -am`）。
   - **Node**：自定义启动命令（如 `pnpm run dev`）。
   - **Folder**：仅作为目录容器，不启动脚本，用于挂载终端会话。
+- **任务看板与 Agent 派发**：想法 / 待执行 / 任务中 / 待审核 / 已完成五列看板（卡片跨列拖动），任务可一键派发给 claude / codex / pi 执行，输出实时落盘可回放，再次执行自动续跑同一会话；数据持久化到 `tasks.json`。
 - **内置终端会话**：基于真 PTY（`node-pty`）+ `xterm.js`，在项目目录里开交互式终端：
-  - **Claude Code** / **Codex** / **pi**：完整 TUI 可用（光标、清屏、Alt 屏、颜色）。
-  - **cmd**：普通 Windows cmd shell。
+  - **Claude Code** / **Codex** / **pi**：完整 TUI 可用（光标、清屏、Alt 屏、颜色）；支持从 CLI 本地历史会话列表恢复（claude `--resume` / codex `resume` / pi `--session`）。
+  - **cmd / Git Bash**：普通 shell 会话。
 - **文件目录浏览**：左侧活动栏点击打开，固定停靠面板懒加载项目目录树；支持在资源管理器中打开目录。
-- **Git 管理**：左侧固定停靠面板（与文件面板互斥）：查看分支与变更、勾选暂存 / 提交、Pull / Push、切换分支、浏览提交历史与 diff（增删行着色）。
+- **文件编辑器 Markdown 预览**：`.md` 文件支持预览 / 编辑两态切换（默认预览态），markdown-it 渲染 + 代码高亮；预览内相对路径图片等资源走只读路由加载；支持 TOC 锚点跳转、回顶按钮，滚动位置随 tab 记忆。
+- **Git / SVN 管理**：左侧固定停靠面板（与文件面板互斥），自动识别 Git 仓库 / SVN 工作副本：查看分支与变更（条列 / 目录树状两种视图）、勾选暂存 / 提交、Pull / Push（SVN 为 update / commit）、切换分支（SVN 为撤回本地修改）、浏览提交历史与 diff（增删行着色）。
 - **多栏分屏**：主区 1~4 栏并列，可同时查看多个会话 / 日志。
 - **左侧固定抽屉**：最左活动栏（项目 / 文件 / Git 三开关 + 底部设置），点按展开对应面板、再点收起；抽屉宽度可拖拽调整，固定挤压终端区不浮动遮挡；项目面板顶部支持一键全部折叠 / 全部展开项目卡片。
 - **文件夹选择**：原生文件夹选择对话框，免手填路径。
@@ -132,7 +134,7 @@ npm run tauri:build
 |---|---|---|
 | `PORT` | `7777` | 服务监听端口。Tauri 套壳时由 Rust 壳选空闲端口传入。也可用 `--port=N` 命令行参数覆盖。 |
 | `CLAUDE_BIN` | `claude` | Claude 终端调用的可执行文件。 |
-| `CLAUDE_ARGS` | （空） | Claude 终端的额外参数，空格分隔。 |
+| `CLAUDE_ARGS` | `--dangerously-skip-permissions` | Claude 终端的额外参数，空格分隔；设了则整体覆盖默认值。 |
 | `CODEX_BIN` | `codex` | Codex 终端调用的可执行文件。 |
 | `CODEX_ARGS` | `-a never` | Codex 终端的额外参数；设了则整体覆盖默认值。 |
 | `PI_BIN` | `pi` | pi 终端调用的可执行文件。 |
@@ -153,6 +155,8 @@ PolyTaskPanel/
 │   ├── index.html         # 单文件前端（UI + xterm.js）
 │   └── logo.png
 ├── projects.json          # 项目列表持久化（运行时生成）
+├── tasks.json             # 任务看板持久化（运行时生成）
+├── settings.json          # 全局设置持久化（运行时生成）
 ├── run.bat                # 直连运行（端口 7777）
 ├── dev.bat                # Tauri 开发模式
 ├── build.bat              # Tauri 打包
@@ -164,7 +168,8 @@ PolyTaskPanel/
 │   ├── bundled-node/      # 打包用 Node（构建时下载）
 │   └── icons/
 ├── test/                  # node:test 测试
-├── docs/                  # 文档
+├── docs/                  # 文档（agents 协作规范等）
+├── .pi/extensions/        # pi 项目级扩展（粘贴优化等）
 └── ABOUT.md
 ```
 
@@ -189,7 +194,10 @@ PolyTaskPanel/
 | `POST` | `/api/projects/:id/clear-logs` | 清空日志 |
 | `POST` | `/api/projects/:id/explorer` | 在资源管理器中打开项目（或子）目录 |
 | `GET` | `/api/projects/:id/files` | 列出项目目录的一层条目（供文件浏览抽屉懒加载树） |
+| `GET` | `/api/projects/:id/raw?sub=` | 项目内文件原样只读回包（按扩展名设 Content-Type），供 Markdown 预览加载相对路径图片等资源；路径沙箱化，越出项目目录返回 400 |
 | `POST` | `/api/pick-folder` | 原生文件夹选择对话框 |
+| `GET` / `PUT` | `/api/settings` | 读取 / 保存全局设置（字体 / 字号 / 命令配置 / 文件黑名单 / 项目折叠状态等） |
+| `GET` / `POST` / `PUT` / `DELETE` | `/api/tasks[...]` | 任务看板 CRUD；`POST /api/tasks/:id/run` 派发 Agent 执行，`GET /api/tasks/:id/output` 读取运行输出 |
 
 ### Git 管理
 
@@ -209,14 +217,15 @@ PolyTaskPanel/
 
 ### 终端会话
 
-`:type` 路径段为 `claude-sessions` / `codex-sessions` / `cmd-sessions` / `pi-sessions` 之一。
+`:type` 路径段为 `claude-sessions` / `codex-sessions` / `cmd-sessions` / `gitbash-sessions` / `pi-sessions` 之一。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/api/projects/:id/:type` | 列出该项目下的活跃终端会话 |
-| `POST` | `/api/projects/:id/:type` | 创建终端会话（cwd = 项目路径） |
+| `POST` | `/api/projects/:id/:type` | 创建终端会话（cwd = 项目路径；body `resume` 可选，恢复 CLI 历史会话） |
 | `DELETE` | `/api/projects/:id/:type/:sessionId` | 关闭终端会话（杀进程树） |
 | `POST` | `/api/projects/:id/:type/:sessionId/resize` | 调整 PTY 尺寸（cols/rows） |
+| `GET` | `/api/projects/:id/:cli-history` | claude / codex / pi 本地历史会话列表（`?offset=&limit=` 分页） |
 
 终端输入输出通过 WebSocket 双向流式传输，消息类型按终端区分（如 `claude-output` / `claude-input` / `claude-session`，Codex / cmd / pi 同理）。
 
@@ -236,7 +245,7 @@ PolyTaskPanel/
 npm test
 ```
 
-覆盖 Claude / Codex / pi 会话契约、资源管理器与文件目录路由、面板共存与持久化、重连、左侧抽屉面板开关与调宽等场景。
+覆盖 Claude / Codex / pi 会话契约、资源管理器与文件目录路由（含 `/raw` 只读回包与路径沙箱）、Markdown 预览渲染、项目卡片点击激活与日志抽屉解耦、任务看板 CRUD 与派发、SVN 更新后刷新回归、面板共存与持久化、重连、左侧抽屉面板开关与调宽等场景。
 
 ---
 
