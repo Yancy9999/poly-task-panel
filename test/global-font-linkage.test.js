@@ -37,7 +37,8 @@ assert(hardcoded.length === 0, `样式表 font-family 硬编码清零（残留: 
 
 // --- 2) 字号不联动：字号变量引用限定在「说明文案承诺的跟随区域」内，不扩散 ---
 // 任务工作台（表单/输出/下拉 4 处）+ 终端区（console-body）+ 日志抽屉（log-drawer-body）
-// + Git diff（.git-diff-pre）+ 文件编辑器（.file-view-pre 及其 code）——与设置面板字号 hint 一致
+// + Git diff（.git-diff-pre）+ 文件编辑器（.file-view-pre 及其 code）
+// + 编辑器 md 预览代码块（.file-view-md pre code）——与设置面板字号 hint 一致
 const SIZE_VAR_SELECTORS = [
   '.task-form-field input, .task-form-field textarea',
   '.task-run-output',
@@ -48,6 +49,7 @@ const SIZE_VAR_SELECTORS = [
   '.git-diff-pre',
   '.file-view-pre',
   '.file-view-pre code',
+  '.file-view-md pre code',
 ];
 const fontSizeVarCount = (clean.match(/font-size:\s*var\(--app-font-size\)/g) || []).length;
 assert(fontSizeVarCount === SIZE_VAR_SELECTORS.length,

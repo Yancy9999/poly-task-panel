@@ -13,6 +13,8 @@
 <!-- highlight.js：文件查看模态框语法高亮（深色主题 github-dark） -->
 <link rel="stylesheet" href="/vendor/hljs/styles/github-dark.min.css">
 <script src="/vendor/hljs/highlight.min.js"></script>
+<!-- markdown-it：文件编辑器 md 预览渲染（UMD，window.markdownit） -->
+<script src="/vendor/markdown-it/markdown-it.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   /* 任务抽屉/工作台跟随设置字体：变量由 applyTermSettings() 写到根元素 inline style，
@@ -66,7 +68,8 @@
   .panel-project .empty { padding: 40px 20px; color: #6b6d70; font-size: 14px; text-align: center; }
   /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片（深色系，紧凑间距：
      左右 margin 与卡片纵向间距一致） */
-  .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; }
+  /* cursor: default 压掉卡片内文字的 I 形光标（子元素未显式设 cursor，均继承此值；操作按钮的 pointer 自带覆盖） */
+  .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; cursor: default; }
   /* 卡片本身不可点、无激活态（日志查看入口走状态按钮），保留 hover 微亮反馈 */
   .project-item:hover { background: #2a2e33; }
   /* 拖拽排序：拖动中的卡片提升为浮动副本，贴随光标；原位用虚框占位。 */
@@ -819,7 +822,7 @@
   .file-view-overlay { display: none; background: transparent; z-index: 150; pointer-events: none; }
   .file-view-overlay.show { display: block; }
   .file-view-overlay.hidden-win { display: none; } /* 编辑器收起态：窗口隐藏但 tab 保留（活动栏按钮可唤回） */
-  .file-view-modal { position: fixed; left: 50%; top: 50%; width: 860px; height: 620px; max-width: none; padding: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: visible; box-shadow: 0 12px 40px rgba(0,0,0,.45); border: 1px solid #3a3c3f; pointer-events: auto; }
+  .file-view-modal { position: fixed; left: 50%; top: 50%; width: 1280px; height: 1024px; max-width: none; padding: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: visible; box-shadow: 0 12px 40px rgba(0,0,0,.45); border: 1px solid #3a3c3f; pointer-events: auto; }
   /* 标题栏：拖动把手（cursor:move），双击还原默认大小。高度压到一行文本（~24px） */
   .file-view-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 0 10px; height: 24px; border-bottom: 1px solid #3a3c3f; border-radius: 10px 10px 0 0; cursor: move; user-select: none; flex-shrink: 0; background: #232528; }
   /* 用 .modal 前缀抬优先级：否则全局 .modal h2 的 margin-bottom:18px 会盖掉 margin:0，
@@ -845,7 +848,7 @@
   /* tab 拖动排序：拖动中的 tab 半透明让位视觉；落点指示线（before 元素画在目标位） */
   .fv-tab.dragging { opacity: .45; }
   .fv-tabbar { position: relative; }
-  .file-view-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 0 0 10px 10px; }
+  .file-view-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 0 0 10px 10px; position: relative; }
   .file-view-loading { padding: 30px; text-align: center; color: #86909c; font-size: 14px; font-style: italic; }
   .file-view-notice { margin: 30px auto; padding: 14px 20px; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; color: #86909c; font-size: 14px; line-height: 1.7; }
   /* 代码区：行号 gutter + 代码两列，pre 内滚动（不用 overlay 滚动，缩放时尺寸跟随窗口）。
@@ -869,6 +872,37 @@
   .fv-rz-se { bottom: -6px; right: -6px; width: 16px; height: 16px; cursor: nwse-resize; }
   .fv-rz-sw { bottom: -6px; left: -6px; width: 16px; height: 16px; cursor: nesw-resize; }
   .fv-rz:hover { background: rgba(22,93,255,.15); border-radius: 4px; }
+  /* md 预览容器：编辑区（file-view-pre）的兄弟元素，预览态二选一显示。滚动自容纳；
+     排版样式复用「关于」页 .about-body 的配色体系（深色 README 阅读体验） */
+  .file-view-md { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 24px; display: none; border-radius: 0 0 10px 10px; background: #1d1f21; }
+  .file-view-md.show { display: block; }
+  /* md 预览回顶浮动按钮：绝对定位贴预览区右下角（挂在 file-view-body 内），
+     滚动超一屏浮现（.show 控透明度+可点击，opacity 过渡），点击平滑回顶 */
+  .fv-md-top { position: absolute; right: 20px; bottom: 18px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #3a3c3f; border-radius: 50%; background: #2a2e33; color: #c9cdd4; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 5; }
+  .fv-md-top.show { opacity: 1; pointer-events: auto; }
+  .fv-md-top:hover { background: #33383e; color: #e3e3e3; }
+  .fv-md-top svg { width: 20px; height: 20px; }
+  .file-view-md h1, .file-view-md h2, .file-view-md h3, .file-view-md h4, .file-view-md h5, .file-view-md h6 { color: #e3e3e3; margin: 14px 0 8px; line-height: 1.4; }
+  .file-view-md h1 { font-size: 20px; }
+  .file-view-md h2 { font-size: 16px; }
+  .file-view-md h3 { font-size: 15px; }
+  .file-view-md h4, .file-view-md h5, .file-view-md h6 { font-size: 14px; }
+  .file-view-md p { margin: 8px 0; line-height: 1.75; }
+  .file-view-md ul, .file-view-md ol { margin: 8px 0; padding-left: 22px; line-height: 1.75; }
+  .file-view-md li { margin: 3px 0; }
+  .file-view-md code { font-family: var(--app-font-family); font-size: 13px; background: #2a2e33; color: #ff9a6b; padding: 1px 5px; border-radius: 4px; }
+  .file-view-md pre { background: #0d1117; border: 1px solid #3a3c3f; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  .file-view-md pre code { background: none; color: #e3e3e3; padding: 0; font-size: var(--app-font-size); }
+  .file-view-md blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid #a8d3ff; background: #2a2e33; color: #86909c; border-radius: 0 6px 6px 0; }
+  .file-view-md a { color: #4a9eff; text-decoration: none; }
+  .file-view-md a:hover { text-decoration: underline; }
+  .file-view-md img { max-width: 100%; border-radius: 4px; }
+  .file-view-md hr { border: none; border-top: 1px solid #3a3c3f; margin: 14px 0; }
+  .file-view-md table { border-collapse: collapse; margin: 10px 0; }
+  .file-view-md th, .file-view-md td { border: 1px solid #3a3c3f; padding: 5px 12px; font-size: 13px; line-height: 1.6; }
+  .file-view-md th { background: #2a2e33; color: #e3e3e3; }
+  .file-view-md td { color: #c9cdd4; }
+  .file-view-md input[type="checkbox"] { margin-right: 5px; vertical-align: -2px; }
 </style>
 </head>
 <body>
@@ -1123,6 +1157,11 @@
     <div class="file-view-titlebar" id="fileViewTitlebar">
       <h2 id="fileViewTitle" class="file-view-title">文件</h2>
       <div class="file-view-titlebar-actions">
+        <button type="button" class="file-view-tb-btn" id="fileViewMdToggleBtn" title="预览 / 编辑切换" onclick="toggleFvMdPreview()" style="display:none">
+          <!-- 两态图标联动：编辑态显示「眼睛」（点了去预览）；预览态显示「笔」（点了回编辑） -->
+          <svg id="fileViewMdIconPreview" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg id="fileViewMdIconEdit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        </button>
         <button type="button" class="file-view-tb-btn" id="fileViewSaveBtn" title="保存（Ctrl+S）" onclick="saveFileViewActive()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <button type="button" class="file-view-tb-btn" id="fileViewReloadBtn" title="重新加载磁盘内容（未保存的修改将丢失）" onclick="reloadFileViewActive()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         <button type="button" class="file-view-tb-btn" id="fileViewRestoreBtn" title="还原默认大小" onclick="resetFileViewSize()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg></button>
@@ -1138,6 +1177,13 @@
         <div class="fv-gutter" id="fvGutter"></div>
         <code id="fileViewCode" contenteditable="plaintext-only" spellcheck="false"></code>
       </div>
+      <!-- md 预览容器：预览态与编辑区二选一显示；内容由 markdown-it 渲染 -->
+      <div class="file-view-md" id="fileViewMd" style="display:none"></div>
+      <!-- md 预览回顶浮动按钮：放在容器外（renderMdPreview 每次重写容器 innerHTML），
+           绝对定位贴预览区右下角；预览态才显示（.show 控透明度 + pointer-events） -->
+      <button type="button" class="fv-md-top" id="fvMdTopBtn" title="回到顶部">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+      </button>
     </div>
     <!-- 八方向缩放手柄：n/s/e/w 四边 + ne/nw/se/sw 四角 -->
     <div class="fv-rz fv-rz-n" data-rz="n"></div>
@@ -5718,10 +5764,10 @@ function renderGitDrawerTitle() {
   if (!el) return;
   const proj = projects.find(x => x.id === gitDrawerProjectId);
   const isSvn = gitRepoKind === 'svn';
-  const kindLabel = isSvn ? 'SVN' : 'Git';
-  // 标题栏 logo：Git 用 git-scm.com favicon，SVN 用官方 icon（已染成 Git 同款橙）；未选项目时不显
+  // 标题栏 logo：Git 用 git-scm.com favicon，SVN 用官方 icon（已染成 Git 同款橙）；未选项目时不显。
+  // 类型标识由 logo 承担，标题文字只留项目名（未选项目留空）
   if (logoEl) logoEl.innerHTML = proj ? (isSvn ? SVN_LOGO : GITBASH_LOGO) : '';
-  el.textContent = proj ? `${kindLabel} · ${proj.name}` : kindLabel;
+  el.textContent = proj ? proj.name : '';
 }
 function refreshGitDrawer() {
   if (gitRepoKind === 'svn' && svnStatus) {
@@ -7941,7 +7987,7 @@ document.addEventListener('contextmenu', (e) => {
 // Ctrl+S 保存；服务端按 mtime 做冲突检测，冲突时提示重新加载或覆盖。
 // 最小化/关闭：标题栏 — 为最小化（tab 保留）；关闭只走 tab 上的 ×，全部关完窗口消失。
 
-const FILE_VIEW_DEFAULT = { width: 860, height: 620 };  // 默认尺寸（还原用）
+const FILE_VIEW_DEFAULT = { width: 1280, height: 1024 };  // 默认尺寸（还原用）
 const FILE_VIEW_MIN = { width: 360, height: 220 };      // 缩放下限
 let fileViewDrag = null;  // 进行中的拖动/缩放会话：{ mode:'move'|'rz', dir, startX, startY, orig:{left,top,width,height} }
 let fileViewMaxed = false;          // 最大化态：toggleFileViewMax 置位
@@ -7949,7 +7995,10 @@ let fileViewPreMaxRect = null;      // 最大化前的窗口 rect（还原图标
 
 // tab 模型：fvTabs = Map(key -> tab)，fvActiveSub = 当前激活 tab 的 key（null 无）。
 // tab = { sub, projectId, content, mtime, dirty, scrollTop, scrollLeft,
-//         history, hIndex, savedContent }  // 撤销栈：快照数组 + 当前指针 + 磁盘基线（脏标记基准）
+//         mode, mdScrollTop, history, hIndex, savedContent }
+//   mode: 'edit' | 'preview'（仅 md 文件有意义，预览/编辑切换态，随 tab 记忆）
+//   mdScrollTop: 预览容器滚动位置（切 tab/切模式回来恢复）
+//   history/hIndex/savedContent：撤销栈（快照数组 + 当前指针 + 磁盘基线，脏标记基准）
 // key 用 `projectId/sub` 复合键：不同项目可各开同名文件互不覆盖（此前 key 用 sub，
 // 跨项目同路径文件后开直接覆盖先开、未保存内容无确认丢失）。项目 id 形如 p_xxx 不含 /，无歧义。
 const fvTabs = new Map();
@@ -7961,6 +8010,264 @@ let fvEverOpened = false;
 function fileViewModal() { return document.getElementById('fileViewModal'); }
 function fvCodeEl() { return document.getElementById('fileViewCode'); }
 function fvPreEl() { return document.getElementById('fileViewPre'); }
+function fvMdEl() { return document.getElementById('fileViewMd'); }
+
+// md 文件判定：.md / .markdown 扩展名（大小写不敏感）。预览切换按钮只对这类文件显示。
+function isMdFile(sub) {
+  const m = /\.md$|\.markdown$/i.exec(String(sub || ''));
+  return !!m;
+}
+
+// ---------- md 预览（markdown-it + hljs 代码高亮） ----------
+// markdown-it 由 /vendor/markdown-it UMD 引入（window.markdownit）；未加载成功时
+// 降级为纯文本（pre 包裹），预览按钮仍在但渲染兜底。html:true——本地面板只渲染
+// 项目内 md，无第三方来源，保留内联 html（README 常用 details/br 等）。
+// 代码块高亮走已引入的 hljs（与编辑器同一实例）。
+let fvMdRenderer = null;
+function fvMd() {
+  if (fvMdRenderer) return fvMdRenderer;
+  if (window.markdownit) {
+    fvMdRenderer = window.markdownit({
+      html: true,
+      linkify: true,
+      highlight(code, lang) {
+        if (window.hljs && lang && hljs.getLanguage(lang)) {
+          try { return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value; } catch (_) {}
+        }
+        return ''; // 交给 markdown-it 默认 escape 输出
+      },
+    });
+    // 链接统一新开页，不把面板 WebView 导航走；页内锚点除外（新开页会吞掉预览内跳转）
+    const defaultLinkOpen = fvMdRenderer.renderer.rules.link_open
+      || ((tokens, idx, opts, _, self) => self.renderToken(tokens, idx, opts));
+    fvMdRenderer.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
+      const href = tokens[idx].attrGet('href') || '';
+      if (!href.startsWith('#')) {
+        tokens[idx].attrSet('target', '_blank');
+        tokens[idx].attrSet('rel', 'noopener');
+      }
+      return defaultLinkOpen(tokens, idx, opts, env, self);
+    };
+  } else {
+    fvMdRenderer = false; // 标记「已初始化但不可用」，避免每次切换都重试
+  }
+  return fvMdRenderer;
+}
+
+// md 内相对路径资源改写为项目 raw 只读地址（图片/链接）。
+// 单趟扫描 + 方括号深度计数（CommonMark 同款「最内层优先」配对）：每个 [ 计数 +1，
+// ] 弹配对并尝试解析紧随的 (dest "title")——命中则只把 dest 区间记为改写段，文本区
+// 原样保留，嵌套（徽章 [![a](i.png)](l.md)）与文本含 (xxx) 的链接天然各自命中。
+// dest 支持 <尖括号含空格> 与配对圆括号（doc(1).md）写法；行内代码 span 整体跳过
+// （其中的 ] 不参与配对、内容不被改写，与 markdown-it 不解析代码 span 内链接一致）。
+// 单趟 O(n)：不做逐位置回扫/递归重建——2MB（编辑器上限）方括号海输入下回扫实现会
+// O(n²) 卡死预览数十秒以上。
+// 绝对地址（http/https/协议相对/data:/#锚点/站内根路径 /api/...）不动；
+// 源路径里的 %XX 序列先 decode 再 encode（md 里 %20 表空格文件名，直接 encode 会
+// 双重编码成 %2520，服务端解一层后仍是 %20 字面量，找不到磁盘上的空格文件名）；
+// 非法 % 序列 decode 会抛异常，此时按原文编码。
+function rewriteMdRelativeUrls(md, projectId) {
+  const base = `/api/projects/${projectId}/raw?sub=`;
+  const isRel = (u) => u && !/^(https?:|data:|\/\/|#|\/)/i.test(u);
+  const enc = (u) => {
+    try { return encodeURIComponent(decodeURIComponent(u)); }
+    catch (_) { return encodeURIComponent(u); }
+  };
+  // 从 src 的 k 处解析 dest + 可选 "title" + 紧随的 )。
+  // 返回 { raw, start, end, next }（raw 为 dest 原文，start/end 为其在 src 的区间，
+  // next 为结尾 ) 之后位置），非链接结构返回 null。
+  function parseDest(src, k) {
+    let raw, start, end;
+    if (src[k] === '<') {
+      const gt = src.indexOf('>', k + 1);
+      if (gt < 0) return null;
+      raw = src.slice(k + 1, gt); start = k + 1; end = gt + 1; // end 越过 '>'
+    } else {
+      // 普通写法：不含空白；圆括号可配对出现（doc(1).md）
+      let pd = 0, j = k;
+      while (j < src.length) {
+        const ch = src[j];
+        if (/\s/.test(ch)) break;
+        if (ch === ')') { if (pd === 0) break; pd--; }
+        else if (ch === '(') pd++;
+        j++;
+      }
+      if (j === k) return null;
+      raw = src.slice(k, j); start = k; end = j;
+    }
+    let close = end;
+    if (src[close] !== ')') {
+      // 可选 "title"：dest 后空白 + 引号串 + 紧跟 )（引号前遇换行则视为非链接结构）
+      let t = close;
+      while (t < src.length && src[t] !== '\n' && /\s/.test(src[t])) t++;
+      if (src[t] === '"') {
+        const endQ = src.indexOf('"', t + 1);
+        if (endQ > 0 && src[endQ + 1] === ')') close = endQ + 1;
+      }
+    }
+    if (src[close] !== ')') return null;
+    return { raw, start, end, next: close + 1 };
+  }
+  const src = String(md || '');
+  const segs = []; // { start, end, text }：dest 区间改写段（互不重叠，最后按序拼装）
+  let depth = 0;
+  for (let i = 0; i < src.length;) {
+    const c = src[i];
+    if (c === '`') {
+      // 行内代码 span 整体跳过（其内的 ] 不参与配对、内容不改写）。
+      // 未闭合的 run 也整体跳过（按普通字符逐个处理会对反引号海退化 O(n²)）
+      let n = 1;
+      while (src[i + n] === '`') n++;
+      const end = src.indexOf(src.substr(i, n), i + n);
+      i = end > 0 ? end + n : i + n;
+      continue;
+    }
+    if (c === '[') { depth++; i++; continue; }
+    if (c === ']' && depth > 0) {
+      depth--;
+      // parseDest 从 ] 后第二个字符起（跳过 '('）：dest 区间不含外层括号
+      const hit = src[i + 1] === '(' ? parseDest(src, i + 2) : null;
+      if (hit) {
+        if (isRel(hit.raw)) segs.push({ start: hit.start, end: hit.end, text: base + enc(hit.raw) });
+        i = hit.next; // 整个 (dest "title") 原子跳过，dest 内的括号不参与外层配对
+        continue;
+      }
+      i++;
+      continue;
+    }
+    i++;
+  }
+  if (!segs.length) return src;
+  segs.sort((a, b) => a.start - b.start);
+  let out = '', pos = 0;
+  for (const s of segs) { out += src.slice(pos, s.start) + s.text; pos = s.end; }
+  return out + src.slice(pos);
+}
+
+// GitHub 风格标题 slug：小写、去标点（保留字母/数字/空格/连字符/下划线）、空白逐字符转 '-'。
+// 中文等 Unicode 字母保留（与 GitHub 一致）；重复 slug 由调用方加 -1/-2 后缀。
+function fvMdSlug(text) {
+  return String(text).trim().toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}\s_-]/gu, '')
+    .replace(/\s/g, '-');
+}
+
+// 预览渲染后给 h1-h6 补挂 id（markdown-it 默认不生成；TOC 的 [x](#标题) 依赖它跳转）。
+// 重复标题按 GitHub 惯例加 -1/-2 后缀。
+function fvMdAddHeadingIds(root) {
+  const seen = {};
+  root.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+    const base = fvMdSlug(h.textContent) || 'section';
+    seen[base] = (seen[base] || 0) + 1;
+    h.id = seen[base] > 1 ? `${base}-${seen[base] - 1}` : base;
+  });
+}
+
+// 预览容器点击委托（渲染时挂一次）：a[href^="#"] 阻止默认导航，改为滚动容器到目标标题。
+// 目标不存在静默不动；锚点在渲染前已被排除 target=_blank，不会新开页。
+function fvMdBindAnchorClick(mdEl) {
+  if (mdEl.dataset.anchorBound) return;
+  mdEl.dataset.anchorBound = '1';
+  mdEl.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    e.preventDefault();
+    let id;
+    try { id = decodeURIComponent(a.getAttribute('href').slice(1)); }
+    catch (_) { return; } // 畸形 % 序列的 href：静默不动
+    // 遍历比对而非拼选择器：id 来自 md 内容（用户可控），含引号等字符会使选择器非法
+    let target = null;
+    for (const el of mdEl.querySelectorAll('[id]')) {
+      if (el.id === id) { target = el; break; }
+    }
+    if (target) {
+      // rect 差值：目标相对容器顶部的偏移（offsetTop 受 offsetParent 嵌套影响，rect 差值更稳）
+      const top = target.getBoundingClientRect().top - mdEl.getBoundingClientRect().top;
+      mdEl.scrollTop += top;
+    }
+  });
+}
+
+// 渲染 md 预览：改写相对路径 → markdown-it → hljs 高亮进 pre>code。
+// markdown-it 不可用时降级为 escapeHtml + pre 纯文本（仍可读）。
+function renderMdPreview(tab) {
+  const mdEl = fvMdEl();
+  document.getElementById('fileViewLoading').style.display = 'none';
+  document.getElementById('fileViewNotice').style.display = 'none';
+  const src = rewriteMdRelativeUrls(tab.content, tab.projectId);
+  const md = fvMd();
+  if (md) {
+    mdEl.innerHTML = md.render(src);
+    fvMdAddHeadingIds(mdEl);
+    fvMdBindAnchorClick(mdEl);
+    fvMdBindScroll(mdEl);
+  } else {
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.textContent = tab.content;
+    mdEl.innerHTML = '';
+    mdEl.appendChild(pre);
+  }
+}
+
+// ---------- md 预览回顶浮动按钮 ----------
+
+// 滚动监听（容器上挂一次）：滚动超一屏浮现回顶按钮，回到一屏内隐藏。
+// 显隐用 .show 类控 opacity（CSS 过渡），display 常驻由预览态显隐统一管。
+function fvMdBindScroll(mdEl) {
+  if (mdEl.dataset.topBound) return;
+  mdEl.dataset.topBound = '1';
+  mdEl.addEventListener('scroll', () => fvMdSyncTopBtn(), { passive: true });
+}
+
+// 按预览容器滚动位置同步回顶按钮显隐：预览态且滚动超一屏加 .show（透明度过渡浮现），
+// 其余情形（顶部附近/编辑态/非 md tab）移除 .show——按钮 opacity:0 且不可点击。
+function fvMdSyncTopBtn() {
+  const mdEl = fvMdEl();
+  const btn = document.getElementById('fvMdTopBtn');
+  if (!btn) return;
+  const show = mdEl.style.display !== 'none' && mdEl.classList.contains('show')
+    && mdEl.scrollTop > mdEl.clientHeight;
+  btn.classList.toggle('show', show);
+}
+
+// 回顶按钮点击：平滑滚回顶部（滚动位置随 mdScrollTop 记忆机制自然同步——scroll 事件更新不了
+// tab（tab 持有方在各切点），但切走时 stash/toggle 记忆的是当时 scrollTop，回顶后即 0，口径一致）
+function fvMdScrollTop() {
+  fvMdEl().scrollTo({ top: 0, behavior: 'smooth' });
+}
+document.getElementById('fvMdTopBtn').addEventListener('click', fvMdScrollTop);
+
+// 预览/编辑切换（仅 md 文件）：预览先把编辑区实时内容 stash 回 tab，再渲染显示；
+// 切回编辑走 renderFileViewContent 重渲编辑区并聚焦。
+function toggleFvMdPreview() {
+  const tab = fvTabs.get(fvActiveSub);
+  if (!tab || !isMdFile(tab.sub)) return;
+  const mdEl = fvMdEl();
+  const pre = fvPreEl();
+  if (tab.mode === 'preview') {
+    // → 编辑：预览滚动位置先记忆（切回预览时恢复，往返不丢阅读位置）
+    tab.mdScrollTop = mdEl.scrollTop;
+    tab.mode = 'edit';
+    mdEl.classList.remove('show');
+    mdEl.style.display = 'none';
+    fvMdSyncTopBtn();
+    renderFileViewContent(tab.content, tab.sub);
+    pre.style.display = '';
+    fvCodeEl().focus();
+  } else {
+    // → 预览：先 stash（脏内容写回 tab.content），滚动位置两个容器各自记忆
+    stashActiveFvTab();
+    tab.mode = 'preview';
+    renderMdPreview(tab);
+    mdEl.style.display = '';
+    mdEl.classList.add('show');
+    pre.style.display = 'none';
+    mdEl.scrollTop = tab.mdScrollTop || 0;
+    fvMdSyncTopBtn();
+  }
+  syncFileViewToolbar();
+}
 
 // 按扩展名映射 highlight.js 语言 id（不认识的扩展名返回 null，走 autoHighlight 按内容猜）
 const FILE_VIEW_LANG_MAP = {
@@ -7994,7 +8301,8 @@ async function openFileViewer(sub) {
     return;
   }
   // 新 tab：先显示 loading 占位（history[0] 在内容加载完成后作为初始快照压入）
-  const tab = { sub, projectId: proj.id, content: '', mtime: null, dirty: false, scrollTop: 0, scrollLeft: 0, history: [], hIndex: -1, savedContent: null };
+  // md 文件默认预览态（阅读为主，编辑点标题栏「笔」切换），其它文件编辑态
+  const tab = { sub, projectId: proj.id, content: '', mtime: null, dirty: false, scrollTop: 0, scrollLeft: 0, mode: isMdFile(sub) ? 'preview' : 'edit', mdScrollTop: 0, history: [], hIndex: -1, savedContent: null };
   fvTabs.set(key, tab);
   fvActiveSub = key;
   showFileViewWindow();
@@ -8004,7 +8312,9 @@ async function openFileViewer(sub) {
   const pre = fvPreEl();
   document.getElementById('fileViewTitle').textContent = `${proj.name} / ${sub}`;
   loading.style.display = ''; loading.textContent = '加载中…';
+  // 两个内容容器都隐藏：切 tab 瞬间不能漏显上一个 tab 的预览/编辑内容（加载完成由 renderActiveFvTab 二选一显示）
   notice.style.display = 'none'; pre.style.display = 'none';
+  const mdLoading = fvMdEl(); mdLoading.style.display = 'none'; mdLoading.classList.remove('show');
   try {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(sub)}`);
     const data = await resp.json();
@@ -8016,14 +8326,16 @@ async function openFileViewer(sub) {
     if (data.isBinary) { fvTabs.delete(key); fvActiveSub = null; showFileViewNotice('二进制文件，暂不支持查看'); renderFvTabbar(); syncEditorActivityBtn(); return; }
     tab.content = data.content || '';
     tab.mtime = typeof data.mtime === 'number' ? data.mtime : null;
-    // 撤销栈初始化：磁盘内容为 0 号快照与脏标记基线
-    tab.history = [tab.content];
+    // 撤销栈初始化：磁盘内容为 0 号快照与脏标记基线。
+    // 快照与 savedContent 口径统一去尾换行（fvPushHistory/stash 从 DOM 读回时都会 replace(/\n$/)）：
+    // 只统一快照不统一 savedContent，undo 回基线会被误判为脏（差一个尾 \n）；反之 stash 后的等价快照会顶掉 redo 分支
+    tab.history = [tab.content.replace(/\n$/, '')];
     tab.hIndex = 0;
-    tab.savedContent = tab.content;
+    tab.savedContent = tab.content.replace(/\n$/, '');
     renderFvTabbar();
     renderActiveFvTab();
-    // 打开即编辑：聚焦编辑区（常态即编辑态，code 恒 contenteditable）
-    fvCodeEl().focus();
+    // 打开即聚焦：md 预览态不聚焦（编辑区隐藏），其余聚焦编辑区（常态即编辑态）
+    if (tab.mode !== 'preview') fvCodeEl().focus();
   } catch (e) {
     if (fvActiveSub !== key || !fvTabs.has(key)) return;
     fvTabs.delete(key); fvActiveSub = null;
@@ -8166,11 +8478,13 @@ function renderFvTabbar() {
   syncFileViewToolbar();
 }
 
-// 标题栏按钮/标题按当前 tab 状态同步（保存钮：有脏改动时显示；刷新钮：有 tab 时显示）
+// 标题栏按钮/标题按当前 tab 状态同步（保存钮：有脏改动时显示；刷新钮：有 tab 时显示；
+// 预览切换钮：当前 tab 是 md 文件时显示，图标联动模式——编辑态显「眼睛」、预览态显「笔」）
 function syncFileViewToolbar() {
   const title = document.getElementById('fileViewTitle');
   const saveBtn = document.getElementById('fileViewSaveBtn');
   const reloadBtn = document.getElementById('fileViewReloadBtn');
+  const mdBtn = document.getElementById('fileViewMdToggleBtn');
   const tab = fvTabs.get(fvActiveSub);
   const proj = tab ? projects.find(x => x.id === tab.projectId) : null;
   const fullSub = tab && proj ? `${proj.name} / ${tab.sub}` : (tab ? tab.sub : '文件');
@@ -8178,6 +8492,14 @@ function syncFileViewToolbar() {
   title.title = fullSub;
   saveBtn.style.display = (tab && tab.dirty) ? '' : 'none';
   reloadBtn.style.display = tab ? '' : 'none';
+  const isMd = tab && isMdFile(tab.sub);
+  mdBtn.style.display = isMd ? '' : 'none';
+  if (isMd) {
+    const previewMode = tab.mode === 'preview';
+    document.getElementById('fileViewMdIconPreview').style.display = previewMode ? 'none' : '';
+    document.getElementById('fileViewMdIconEdit').style.display = previewMode ? '' : 'none';
+    mdBtn.title = previewMode ? '编辑' : '预览';
+  }
 }
 
 // 重新加载当前 tab：丢弃本地内容（含未保存修改），从磁盘重读。
@@ -8196,7 +8518,9 @@ async function reloadFileViewActive() {
   const notice = document.getElementById('fileViewNotice');
   const pre = fvPreEl();
   loading.style.display = ''; loading.textContent = '加载中…';
+  // 两个内容容器都隐藏：重载瞬间不能漏显上一个 tab 或切换前的内容（完成由 renderActiveFvTab 二选一显示）
   notice.style.display = 'none'; pre.style.display = 'none';
+  const mdLoading = fvMdEl(); mdLoading.style.display = 'none'; mdLoading.classList.remove('show');
   try {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`);
     const data = await resp.json();
@@ -8208,15 +8532,17 @@ async function reloadFileViewActive() {
     tab.content = data.content || '';
     tab.mtime = typeof data.mtime === 'number' ? data.mtime : null;
     tab.dirty = false;
-    // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈
-    tab.history = [tab.content];
+    // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈（快照与 savedContent 口径去尾，同 openFileViewer）
+    tab.history = [tab.content.replace(/\n$/, '')];
     tab.hIndex = 0;
-    tab.savedContent = tab.content;
+    tab.savedContent = tab.content.replace(/\n$/, '');
     tab.scrollTop = 0;
     tab.scrollLeft = 0;
+    tab.mdScrollTop = 0;
     syncFileViewToolbar();
     renderActiveFvTab();
-    fvCodeEl().focus();
+    // 预览态保持焦点在预览容器（编辑区此时是隐藏的，focus 会被忽略）
+    if (tab.mode !== 'preview') fvCodeEl().focus();
   } catch (e) {
     if (fvActiveSub !== key || !fvTabs.has(key)) return;
     showFileViewNotice('读取失败: ' + e.message);
@@ -8367,18 +8693,33 @@ async function execFvTabContextAction(act) {
   initFvTabDrag();
 })();
 
-// 渲染当前激活 tab 的内容到窗口（loading/notice 让位）。始终为编辑态渲染。
+// 渲染当前激活 tab 的内容到窗口（loading/notice 让位）。按 tab.mode 决定渲染编辑态或预览态。
 function renderActiveFvTab() {
   const tab = fvTabs.get(fvActiveSub);
   const loading = document.getElementById('fileViewLoading');
   const notice = document.getElementById('fileViewNotice');
   const pre = fvPreEl();
-  if (!tab) { loading.style.display = 'none'; notice.style.display = 'none'; pre.style.display = 'none'; return; }
+  const mdEl = fvMdEl();
+  if (!tab) { loading.style.display = 'none'; notice.style.display = 'none'; pre.style.display = 'none'; mdEl.style.display = 'none'; mdEl.classList.remove('show'); fvMdSyncTopBtn(); return; }
   const proj = projects.find(x => x.id === tab.projectId);
   document.getElementById('fileViewTitle').textContent = proj ? `${proj.name} / ${tab.sub}` : tab.sub;
-  renderFileViewContent(tab.content, tab.sub);
-  pre.scrollTop = tab.scrollTop || 0;
-  pre.scrollLeft = tab.scrollLeft || 0;
+  if (tab.mode === 'preview') {
+    // 预览态：编辑区隐藏（保持 DOM，切回不用重渲），预览容器渲染显示
+    pre.style.display = 'none';
+    renderMdPreview(tab);
+    mdEl.style.display = '';
+    mdEl.classList.add('show');
+    mdEl.scrollTop = tab.mdScrollTop || 0;
+    fvMdSyncTopBtn();
+  } else {
+    mdEl.style.display = 'none';
+    mdEl.classList.remove('show');
+    fvMdSyncTopBtn();
+    renderFileViewContent(tab.content, tab.sub);
+    pre.style.display = '';
+    pre.scrollTop = tab.scrollTop || 0;
+    pre.scrollLeft = tab.scrollLeft || 0;
+  }
 }
 
 // 大文件 / 二进制 / 错误的统一提示态
@@ -8388,6 +8729,8 @@ function showFileViewNotice(msg) {
   notice.textContent = msg;
   notice.style.display = '';
   fvPreEl().style.display = 'none';
+  fvMdEl().style.display = 'none';
+  fvMdSyncTopBtn();
 }
 
 function fmtFileViewSize(n) {
@@ -8441,9 +8784,15 @@ function renderFileViewContent(code, sub) {
 function stashActiveFvTab() {
   const tab = fvTabs.get(fvActiveSub);
   if (!tab) return;
+  const pre = fvPreEl();
+  // 预览态：编辑区 display:none（innerText 是切预览前的旧内容），只记预览滚动位置；
+  // tab.content 已在切预览时 stash 过，这里不再动（避免旧 DOM 内容回写/误打撤销点）
+  if (tab.mode === 'preview') {
+    tab.mdScrollTop = fvMdEl().scrollTop;
+    return;
+  }
   fvPushHistory(tab);
   tab.content = fvCodeEl().innerText.replace(/\n$/, '');
-  const pre = fvPreEl();
   tab.scrollTop = pre.scrollTop;
   tab.scrollLeft = pre.scrollLeft;
 }
@@ -8522,7 +8871,7 @@ function fvRestoreSnapshot(tab, text) {
 
 function undoFvEdit() {
   const tab = fvTabs.get(fvActiveSub);
-  if (!tab || tab.hIndex <= 0) return;
+  if (!tab || tab.mode === 'preview' || tab.hIndex <= 0) return;
   // 先把编辑区当前实时内容打点（上次 debounce 还没落栈的输入），再后退
   fvPushHistory(tab);
   if (tab.hIndex <= 0) return;
@@ -8533,7 +8882,7 @@ function undoFvEdit() {
 
 function redoFvEdit() {
   const tab = fvTabs.get(fvActiveSub);
-  if (!tab || tab.hIndex >= tab.history.length - 1) return;
+  if (!tab || tab.mode === 'preview' || tab.hIndex >= tab.history.length - 1) return;
   fvPushHistory(tab);
   if (tab.hIndex >= tab.history.length - 1) return;
   tab.hIndex++;
@@ -8550,7 +8899,10 @@ async function saveFileViewActive() {
   // 内容尚未加载完成（mtime 未知）的 tab 禁止保存：此时无法做冲突检测，
   // 基于占位空内容的写入会清空磁盘上的真实文件
   if (tab.mtime === null) { showToast('文件内容尚未加载完成，无法保存', 'warning'); return; }
-  stashActiveFvTab();
+  // 预览态：内容在切预览时已 stash（tab.content 即最新），直接以缓存内容保存；
+  // 成功后重渲预览（内容可能被覆盖磁盘分支改掉），不渲染编辑区（保持隐藏，避免双容器同显）
+  const inPreview = tab.mode === 'preview';
+  if (!inPreview) stashActiveFvTab();
   const saveOnce = async (force) => {
     const resp = await fetch(`/api/projects/${proj.id}/file-content?sub=${encodeURIComponent(tab.sub)}`, {
       method: 'PUT',
@@ -8574,10 +8926,10 @@ async function saveFileViewActive() {
         if (data3.ok) {
           tab.mtime = typeof data3.mtime === 'number' ? data3.mtime : tab.mtime;
           tab.dirty = false;
-          tab.savedContent = tab.content;
-          tab.history = [tab.content];
+          tab.savedContent = tab.content.replace(/\n$/, '');
+          tab.history = [tab.content.replace(/\n$/, '')];
           tab.hIndex = 0;
-          renderFileViewContent(tab.content, tab.sub);
+          if (inPreview) renderMdPreview(tab); else renderFileViewContent(tab.content, tab.sub);
           renderFvTabbar();
           refreshFileTreeCacheForSave(proj.id);
         } else {
@@ -8592,11 +8944,11 @@ async function saveFileViewActive() {
           tab.content = data2.content || '';
           tab.mtime = data2.mtime;
           tab.dirty = false;
-          // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈
-          tab.history = [tab.content];
+          // 磁盘重载 = 撤销历史作废（内容基线已变），重建栈（快照与 savedContent 口径去尾，同 openFileViewer）
+          tab.history = [tab.content.replace(/\n$/, '')];
           tab.hIndex = 0;
-          tab.savedContent = tab.content;
-          renderFileViewContent(tab.content, tab.sub);
+          tab.savedContent = tab.content.replace(/\n$/, '');
+          if (inPreview) renderMdPreview(tab); else renderFileViewContent(tab.content, tab.sub);
           renderFvTabbar();
         } else {
           showToast(data2.msg || '重新加载失败', 'error');
@@ -8607,9 +8959,10 @@ async function saveFileViewActive() {
     if (!data.ok) { showToast(data.msg || '保存失败', 'error'); return; }
     tab.mtime = typeof data.mtime === 'number' ? data.mtime : tab.mtime;
     tab.dirty = false;
-    tab.savedContent = tab.content; // 新磁盘基线（脏标按此派生，撤销仍可回退）
-    // 保存后用新内容重渲（刷新高亮与行号），保留滚动位置
-    renderFileViewContent(tab.content, tab.sub);
+    // 新磁盘基线（脏标按此派生，撤销仍可回退）；去尾口径与快照一致（content 来自 stash，本就无尾 \n）
+    tab.savedContent = tab.content.replace(/\n$/, '');
+    // 保存后用新内容重渲（刷新高亮与行号），保留滚动位置；预览态重渲预览
+    if (inPreview) renderMdPreview(tab); else renderFileViewContent(tab.content, tab.sub);
     renderFvTabbar();
     refreshFileTreeCacheForSave(proj.id);
   } catch (e) {
@@ -8642,9 +8995,11 @@ function parentDirOf(sub) {
 // 撤销/重做只在编辑器窗口可见且焦点不在输入框外元素时拦截（避免劫持其它面板快捷键）。
 document.addEventListener('keydown', (e) => {
   const overlay = document.getElementById('fileViewOverlay');
-  const editorVisible = overlay.classList.contains('show') && fvTabs.has(fvActiveSub);
+  const tab = fvTabs.get(fvActiveSub);
+  const editorVisible = overlay.classList.contains('show') && tab;
+  // 预览态没有实时编辑内容可保存，Ctrl+S 不拦截（避免误触保存/双容器同显风险）
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    if (editorVisible) {
+    if (editorVisible && tab.mode !== 'preview') {
       e.preventDefault();
       e.stopPropagation();
       saveFileViewActive();

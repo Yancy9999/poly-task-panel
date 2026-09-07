@@ -96,8 +96,9 @@ function clickConfirm(window_, id) {
   const doc = window.document;
 
   // --- 准备：打开文件查看器并让 tab 处于可保存态（mtime 已加载） ---
+  // 用 .txt：md 文件现在默认预览态（编辑区隐藏），保存冲突测试与 md 预览无关
   window.openFileDrawer('p1');
-  await window.openFileViewer('README.md');
+  await window.openFileViewer('notes.txt');
   await wait(20);
   // 模拟用户编辑：直接改 code 元素文本并派发 input（dirty 由 input 监听置位，
   // stashActiveFvTab 从 DOM 读回 tab.content 并去掉末尾换行）

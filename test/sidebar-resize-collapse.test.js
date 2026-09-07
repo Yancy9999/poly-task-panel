@@ -132,7 +132,10 @@ function assert(cond, msg) {
   window.openGitDrawer('p2');
   assert(doc.getElementById('panelGit').style.display === 'flex', 'openGitDrawer 打开 Git 面板');
   assert(doc.getElementById('panelFile').style.display === 'none', 'Git 面板打开时文件面板隐藏（互斥）');
-  assert(doc.getElementById('gitDrawerTitle').textContent.includes('My Backend'), 'Git 面板标题绑定项目名');
+  const gitTitle = doc.getElementById('gitDrawerTitle').textContent;
+  assert(gitTitle === 'My Backend', `Git 面板标题只显示项目名（不含 Git/SVN 字样，got "${gitTitle}"）`);
+  // logo 承担类型标识：Git 时应渲染 GITBASH_LOGO，标题文字本身不再重复 Git/SVN
+  assert(!!doc.getElementById('gitDrawerLogo').innerHTML, 'Git 面板标题栏渲染 logo 图标');
 
   // --- 项目卡片渲染（新面板内）---
   const listHtml = doc.getElementById('sidebarList').innerHTML;

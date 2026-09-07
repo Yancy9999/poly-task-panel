@@ -921,6 +921,11 @@ app.use('/vendor/xterm-addon-fit', express.static(
 app.use('/vendor/hljs', express.static(
   path.join(ROOT_DIR, 'node_modules', '@highlightjs', 'cdn-assets'), staticOpts
 ));
+// markdown-it：编辑器 md 预览渲染。用法同 hljs——前端从 /vendor/markdown-it/
+// 加载 UMD 产物，window.markdownit 可用后预览生效（未加载时降级为纯文本）。
+app.use('/vendor/markdown-it', express.static(
+  path.join(ROOT_DIR, 'node_modules', 'markdown-it', 'dist', 'browser'), staticOpts
+));
 
 // 关于页内容源：根目录 ABOUT.md（前端 fetch 后本地渲染 markdown）。
 // 版本号自动同步：以 package.json 的 version 为准，替换 ABOUT.md 中的
@@ -1353,6 +1358,37 @@ app.put('/api/projects/:id/file-content', (req, res) => {
   }
   // 返回写入后的新 mtime，前端更新 tab 记录，后续保存继续以此做冲突检测
   res.json({ ok: true, size: Buffer.byteLength(content, 'utf8'), mtime: fs.statSync(target).mtimeMs });
+});
+
+// 项目内文件原样只读下载：md 预览里相对路径图片（![](docs/x.png)）的加载源。
+// 沙箱化同 /file-content；按扩展名映射 Content-Type，白名单外的类型仍放行
+// （浏览器自行处理），但只读不写。文本用 file-content 即可，此路由只服务二进制资源。
+const RAW_CONTENT_TYPES = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon', bmp: 'image/bmp',
+  avif: 'image/avif', mp4: 'video/mp4', webm: 'video/webm',
+};
+app.get('/api/projects/:id/raw', (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) return res.status(404).json({ ok: false, msg: '项目不存在' });
+  const base = p.projectPath;
+  if (!fs.existsSync(base)) return res.status(404).json({ ok: false, msg: '目录不存在: ' + base });
+  const sub = req.query.sub ? String(req.query.sub) : '';
+  if (!sub) return res.status(400).json({ ok: false, msg: '未指定文件路径' });
+  const target = path.resolve(path.join(base, sub));
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return res.status(400).json({ ok: false, msg: '路径超出项目目录' });
+  }
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    return res.status(404).json({ ok: false, msg: '文件不存在: ' + sub });
+  }
+  const ext = (sub.split('.').pop() || '').toLowerCase();
+  if (RAW_CONTENT_TYPES[ext]) res.type(RAW_CONTENT_TYPES[ext]);
+  // 只读流式回包；不设缓存（编辑器场景文件随时可改，preview 每次渲染重拉）
+  fs.createReadStream(target).on('error', () => {
+    res.status(500).end('read failed');
+  }).pipe(res);
 });
 
 // 新建文件/文件夹：body { parentSub, name, isDir }。parentSub 为目标父目录（'' = 项目根）。
