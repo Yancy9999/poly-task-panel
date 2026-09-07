@@ -9,7 +9,7 @@ const html = fs.readFileSync(htmlPath, 'utf8');
 const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
 const inlineScript = scripts[scripts.length - 1][1] +
   '\nwindow.__getPanes = () => panes; window.__getActive = () => activePaneId; window.__setActive = (id) => activePaneId = id;'
-  + 'window.__getLogPanes = () => logPanes; window.__getLogActive = () => activeLogPaneId; window.__setLogActive = (id) => activeLogPaneId = id;'
+  + 'window.__getLogPanes = () => logPanes; window.__getLogActive = () => null;' // 日志分栏已无激活态
   + 'window.__termSessions = termSessions;';
 
 const dom = new JSDOM(html, { url: 'http://localhost:7777/', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -67,18 +67,17 @@ function assert(cond, msg) {
   assert(saved.panes[1].view === 'c_1' && saved.panes[1].projectId === 'A', '会话视图原样保存 sessionId');
   assert(saved.active === 1, `激活栏按下标保存 (got ${saved.active})`);
 
-  // --- 1b. 日志分栏独立持久化到 logPaneLayout ---
+  // --- 1b. 日志分栏独立持久化到 logPaneLayout（纯显示：不存激活栏） ---
   const LP = () => window.__getLogPanes();
   LP().length = 0;
   LP().push({ id: 'l1', projectId: 'A', view: 'log' });
   LP().push({ id: 'l2', projectId: null, view: 'empty' });
-  window.__setLogActive('l1');
   window.renderLogPanes();
   await wait(10);
   const savedLog = JSON.parse(ls.getItem('logPaneLayout'));
   assert(!!savedLog, 'renderLogPanes 后 logPaneLayout 已写入');
   assert(savedLog.panes.length === 2 && savedLog.panes[0].view === 'log' && savedLog.panes[0].projectId === 'A', '日志栏独立持久化');
-  assert(savedLog.active === 0, '日志激活栏按下标保存');
+  assert(!('active' in savedLog), '日志分栏无激活态：不保存 active 字段');
 
   // --- 2. restorePaneLayout 恢复：重建栏数、empty/会话视图、激活栏 ---
   window.restorePaneLayout();
@@ -88,12 +87,13 @@ function assert(cond, msg) {
   assert(ps[1].view === 'c_1' && ps[1].projectId === 'A', '恢复会话视图（保留 projectId 供重连判定）');
   assert(window.__getActive() === ps[1].id, '激活栏恢复到保存的下标');
 
-  // --- 2b. restoreLogPaneLayout 恢复日志分栏 ---
+  // --- 2b. restoreLogPaneLayout 恢复日志分栏（无激活态；旧数据残留 active 字段被忽略） ---
+  ls.setItem('logPaneLayout', JSON.stringify({ panes: [{ projectId: 'A', view: 'log' }, { projectId: null, view: 'empty' }], active: 0 }));
   window.restoreLogPaneLayout();
   const lps = LP();
   assert(lps.length === 2, `恢复 2 日志栏 (got ${lps.length})`);
   assert(lps[0].view === 'log' && lps[0].projectId === 'A', '恢复日志栏');
-  assert(window.__getLogActive() === lps[0].id, '日志激活栏恢复到保存的下标');
+  assert(window.__getLogActive() === null, '日志分栏无激活态：activeLogPaneId 恒为 null');
 
   // --- 2c. 终端 panes 中残留的 log 视图在恢复时降级为 empty（日志已剥离） ---
   ls.setItem('paneLayout', JSON.stringify({ panes: [{ projectId: 'A', view: 'log' }], active: 0 }));

@@ -69,9 +69,11 @@
   /* 合并后的单卡片：项目信息 + 会话子区域合成一张带边框圆角卡片（深色系，紧凑间距：
      左右 margin 与卡片纵向间距一致） */
   /* cursor: default 压掉卡片内文字的 I 形光标（子元素未显式设 cursor，均继承此值；操作按钮的 pointer 自带覆盖） */
-  .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; cursor: default; }
-  /* 卡片本身不可点、无激活态（日志查看入口走状态按钮），保留 hover 微亮反馈 */
+  .project-item { margin: 0 6px 6px; padding: 8px 12px 6px; border: 1px solid #3a3c3f; border-radius: 6px; background: #232528; display: flex; flex-direction: column; gap: 4px; cursor: default; position: relative; }
+  /* 卡片可点（激活项目：点卡片/第二排按钮；第一排运行按钮与折叠按钮不激活），保留 hover 微亮反馈 */
   .project-item:hover { background: #2a2e33; }
+  /* 卡片激活态：左缘 3px 橙色竖线（与终端激活栏顶部橙条同色），由 currentId 驱动 */
+  .project-item.active::before { content: ''; position: absolute; top: -1px; bottom: -1px; left: -1px; width: 3px; border-radius: 6px 0 0 6px; background: #ff8f1f; z-index: 1; }
   /* 拖拽排序：拖动中的卡片提升为浮动副本，贴随光标；原位用虚框占位。 */
   .project-item.drag-ghost { position: fixed !important; z-index: 9999; margin: 0; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.18); opacity: .96; transform: rotate(-1deg); transition: none; }
   .project-item.drag-placeholder { opacity: .35; border-style: dashed; border-color: #165dff; background: #2a3a4f; }
@@ -141,7 +143,7 @@
   /* 终端会话区块（claude / codex）：合并进项目卡片的会话子区域，
      分隔线以下直接继承卡片背景（深色卡片时与会话区同色），
      左竖线经 .project-item 的 border-left 贯穿到本区域。
-     点击不冒泡到 selectProject。Claude/Codex logo 保留品牌橙做点缀。 */
+     区块内空白区点击冒泡到卡片激活；按钮/会话条目各自拦截。 */
   .term-block { margin: 0; padding: 6px 0 8px; border-top: 1px solid #2a2e33; }
   /* 新建终端会话：并排可点击图标按钮，hover 橙色描边/深橙底（与品牌橙 logo 同色系，和项目卡片蓝色高亮区分） */
   .term-new-row { display: flex; gap: 6px; }
@@ -459,10 +461,11 @@
   .pane-tab { display: inline-flex; align-items: center; min-width: 0; max-width: 60%; padding: 0 12px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c; }
   .pane-tab .pane-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* 激活整栏贯穿：header 整条提亮 + 顶部 2px 橙条横跨全宽（::before 铺满 header 顶边，同激活会话条目 #ff8f1f），
-     header 底边线同步消失，与终端 body 视觉连成一体 */
-  .pane.active .pane-header { background: #2a2e33; border-bottom-color: transparent; position: relative; }
-  .pane.active .pane-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #ff8f1f; }
-  .pane.active .pane-tab { color: #e3e3e3; }
+     header 底边线同步消失，与终端 body 视觉连成一体。
+     限定终端区（data-pane-kind="term"）：日志抽屉分栏纯显示，永不高亮。 */
+  .pane[data-pane-kind="term"].active .pane-header { background: #2a2e33; border-bottom-color: transparent; position: relative; }
+  .pane[data-pane-kind="term"].active .pane-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #ff8f1f; }
+  .pane[data-pane-kind="term"].active .pane-tab { color: #e3e3e3; }
   /* 标题栏工具区：靠右端，与 tab 区以全高分隔线隔开；承载 启/停/重/清 + 关闭 + 分栏 按钮 */
   .pane-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; padding: 0 4px 0 10px; flex-shrink: 0; }
   /* 标题栏图标按钮：ghost 灰底图标，语义色只在 hover 显现 */
@@ -1434,16 +1437,16 @@ function menuState(projectId) {
 
 // ---------- 分栏（pane）状态模型 ----------
 // 两套独立分栏体系：
-//   终端会话（term）：panes，view = sessionId | 'empty'。独占主区上部。
-//   运行日志（log）：logPanes，view = 'log' | 'empty'。位于主区底部可折叠抽屉。
+//   终端会话（term）：panes，view = sessionId | 'empty'。独占主区上部，有激活栏。
+//   运行日志（log）：logPanes，view = 'log' | 'empty'。位于主区底部可折叠抽屉，
+//     纯显示（无激活态）：与项目卡片激活/终端激活栏彻底解耦，分栏点击不改变任何激活状态。
 // activePaneId = 终端区激活栏；currentId 跟随终端激活栏 projectId，与左侧项目卡片高亮同步。
 // 日志缓冲按栏独立（实时流分块到达，多栏各自缓冲不能串扰）；paneId 前缀区分两套（p+seq / l+seq），天然不冲突。
 const MAX_PANES = 4;
 let panes = [];           // 终端会话分栏
 let activePaneId = null;  // 终端区激活栏
 let paneSeq = 0;
-let logPanes = [];           // 运行日志分栏（抽屉内）
-let activeLogPaneId = null;  // 日志区激活栏
+let logPanes = [];           // 运行日志分栏（抽屉内，无激活态）
 let logPaneSeq = 0;
 let ansiBuffers = new Map(); // paneId -> 该栏日志的未完成 ANSI 序列缓冲（终端区不产生日志，仅日志区用）
 // 初始同步窗口标志：WS onopen 后置 true，reconnectSessionPanes 跑完置 false。
@@ -1454,7 +1457,6 @@ let isInitialSync = false;
 function nextPaneId() { return 'p' + (++paneSeq); }
 function nextLogPaneId() { return 'l' + (++logPaneSeq); }
 function activePane() { return panes.find(p => p.id === activePaneId) || null; }
-function activeLogPane() { return logPanes.find(p => p.id === activeLogPaneId) || null; }
 function findPaneBySession(sessionId) {
   return panes.find(p => p.view === sessionId) || null;
 }
@@ -1462,34 +1464,36 @@ function findLogPaneByProject(projectId) {
   return logPanes.find(p => p.view === 'log' && p.projectId === projectId) || null;
 }
 // 为新视图选取目标栏（B 语义 + 自动建栏 + 满栏确认覆盖）：
-// 1. 已有空白栏 → 用激活空白栏优先，否则第一个空白栏
+// 1. 已有空白栏 → 用第一个空白栏（终端区优先激活空白栏）
 // 2. 无空白栏但未满（< MAX_PANES）→ 新建一栏（addPane 语义）
-// 3. 已满 → 返回 Promise<'confirm'> 让调用方弹确认覆盖激活栏；调用方据结果决定是否覆盖
+// 3. 已满 → 返回 Promise<'confirm'> 让调用方弹确认覆盖；调用方据结果决定是否覆盖
+//    覆盖目标：终端区=当前激活栏；日志区（无激活态）=第一个日志栏
 // 返回 Promise<pane | null>：pane=可立即写入的目标栏；null=用户取消/不应写入
 // kind='term' 作用于终端会话分栏，'log' 作用于日志抽屉分栏。
 async function acquireTargetPane(kind) {
   const st = paneState(kind);
-  const act = kind === 'log' ? activeLogPane() : activePane();
+  const act = kind === 'term' ? activePane() : null;
   if (act && act.view === 'empty') return act;
   const empty = st.panes.find(p => p.view === 'empty');
   if (empty) return empty;
   if (st.panes.length < MAX_PANES) {
-    // 新建一栏并激活，返回新栏
+    // 新建一栏，返回新栏（终端区随之激活；日志区无激活态）
     const id = kind === 'log' ? nextLogPaneId() : nextPaneId();
     st.panes.push({ id, projectId: null, view: 'empty' });
-    st.activeId = id;
+    if (kind === 'term') activePaneId = id;
     return st.panes[st.panes.length - 1];
   }
-  // 满栏：弹确认是否覆盖当前激活栏
-  const ok = await showConfirm('分栏已满，是否覆盖当前激活栏？', '覆盖确认');
+  // 满栏：弹确认是否覆盖（终端区覆盖当前激活栏；日志区覆盖第一个日志栏）
+  const ok = await showConfirm(kind === 'log' ? '日志分栏已满，是否覆盖第一个日志栏？' : '分栏已满，是否覆盖当前激活栏？', '覆盖确认');
   if (!ok) return null;
-  const target = kind === 'log' ? activeLogPane() : activePane();
-  return target || null;
+  if (kind === 'log') return st.panes.find(p => p.view === 'log') || null;
+  return activePane() || null;
 }
-// 取某套分栏的可变状态引用（panes 数组 + activeId），供通用操作统一收口。
+// 取某套分栏的可变状态引用（panes 数组 + 激活栏写入口），供通用操作统一收口。
+// 日志区无激活态：setActive 为空操作，调用方对其传值不会产生任何激活效果。
 function paneState(kind) {
   return kind === 'log'
-    ? { panes: logPanes, activeId: activeLogPaneId, setPanes(v){logPanes=v;}, setActive(v){activeLogPaneId=v;} }
+    ? { panes: logPanes, activeId: null, setPanes(v){logPanes=v;}, setActive(){} }
     : { panes: panes, activeId: activePaneId, setPanes(v){panes=v;}, setActive(v){activePaneId=v;} };
 }
 function paneBuffer(paneId) {
@@ -1512,9 +1516,9 @@ function persistPanes() {
   try { localStorage.setItem(PANE_LAYOUT_KEY, JSON.stringify(data)); } catch (e) {}
 }
 function persistLogPanes() {
+  // 日志分栏纯显示：只存栏布局，不存激活栏（无激活态）
   const data = {
     panes: logPanes.map(p => ({ projectId: p.projectId || null, view: p.view })),
-    active: Math.max(0, logPanes.findIndex(p => p.id === activeLogPaneId)),
   };
   try { localStorage.setItem(LOG_PANE_LAYOUT_KEY, JSON.stringify(data)); } catch (e) {}
 }
@@ -1547,7 +1551,8 @@ function restorePaneLayout() {
     activePaneId = id;
   }
 }
-// 恢复日志抽屉持久化布局（栏数 + 每栏项目视图 + 激活栏）；无则单栏空白。
+// 恢复日志抽屉持久化布局（栏数 + 每栏项目视图）；无则单栏空白。
+// 旧版数据里可能残留 active 字段：日志分栏已无激活态，读到直接忽略。
 function restoreLogPaneLayout() {
   const saved = loadLogPaneLayout();
   if (saved && Array.isArray(saved.panes) && saved.panes.length) {
@@ -1558,12 +1563,9 @@ function restoreLogPaneLayout() {
       const view = sp.view === 'log' ? 'log' : 'empty';
       logPanes.push({ id: nextLogPaneId(), projectId: view === 'empty' ? null : (sp.projectId || null), view });
     }
-    const ai = Math.min(Math.max(0, saved.active || 0), logPanes.length - 1);
-    activeLogPaneId = logPanes[ai].id;
   } else {
     const id = nextLogPaneId();
     logPanes = [{ id, projectId: null, view: 'empty' }];
-    activeLogPaneId = id;
   }
 }
 
@@ -1596,6 +1598,17 @@ function toggleProjectCollapsed(projectId) {
   const m = termSettings.projectCollapsed || (termSettings.projectCollapsed = {});
   if (m[projectId]) delete m[projectId]; else m[projectId] = 1;
   saveProjectCollapsed();
+}
+
+// 卡片点击入口（整卡 onclick）：区分点击与拖拽排序的误触。
+// 折叠/展开态点击都只激活，不改变折叠状态；展开折叠只经折叠按钮（stopPropagation 不进这里）。
+// pointerup 距 pointerdown 有位移（正在/刚结束拖拽排序）时吞掉点击。
+let projectClickDown = null; // { x, y }
+function onProjectCardClick(e, projectId) {
+  if (e.button !== undefined && e.button !== 0) return;
+  if (projectClickDown && Math.hypot(e.clientX - projectClickDown.x, e.clientY - projectClickDown.y) > DRAG_THRESHOLD) return;
+  projectClickDown = null;
+  activateProject(projectId);
 }
 
 // 全部折叠/全部展开项目卡片：批量更新折叠 map。折叠=所有项目置 1，展开=清空。
@@ -2228,6 +2241,7 @@ function renderPanes() {
 // ---------- 运行日志分栏渲染（抽屉内） ----------
 // logConsoleBody 动态渲染 N 个 .pane；每栏只承载某项目日志（log/empty 两态），标题栏带启/停/重/清 + 关闭 + 分栏。
 // 复用 .pane/.pane-header/.pane-log 全部深色样式，与终端区视觉一致。
+// 纯显示：无激活态、无点击激活（栏头点击/栏体点击均无反应，仅按钮可操作）。
 function renderLogPanes() {
   const body = document.getElementById('logConsoleBody');
   if (!body) return;
@@ -2235,7 +2249,7 @@ function renderLogPanes() {
   logPanes.forEach((p, i) => {
     const parts = [];
     const proj = projects.find(x => x.id === p.projectId);
-    parts.push(`<div class="pane ${p.id === activeLogPaneId ? 'active' : ''}" data-pane-id="${p.id}" data-project-id="${p.projectId || ''}" data-pane-kind="log" onclick="activatePane('log','${p.id}')">`);
+    parts.push(`<div class="pane" data-pane-id="${p.id}" data-project-id="${p.projectId || ''}" data-pane-kind="log">`);
     // Tab 标题：项目名套 badge + 「日志」后缀；空栏为「空白」
     let titleHtml = '空白';
     let titleText = '空白';
@@ -2434,21 +2448,20 @@ function execPaneContextAction(act) {
   }
 }
 
-// 点标题栏/栏内区域：切换激活栏，并与左侧项目卡片高亮双向同步。
-// 终端区激活栏驱动 currentId（左侧高亮）；日志区激活栏不影响 currentId。
+// 点终端标题栏/栏内区域：切换激活栏，并与左侧项目卡片高亮双向同步。
+// 日志分栏纯显示，无点击激活路径（activatePane 仅服务终端区）。
 function activatePane(kind, paneId) {
-  if (kind === 'log') {
-    if (activeLogPaneId === paneId) return;
-    activeLogPaneId = paneId;
-    renderLogPanes();
-    updatePaneLogButtons();
+  if (kind !== 'term') return;
+  if (activePaneId === paneId) {
+    // 已是激活栏：栏与 currentId 都不变，但抽屉跟随仍需执行（抽屉可能被手动切到别的项目，
+    // 与 activateProject 的 alreadyActive 分支同语义；sync 内部有 diff 守卫，重复调用无副作用）
+    syncFileDrawerToPane(); syncGitDrawerToPane();
     return;
   }
-  if (activePaneId === paneId) return;
   activePaneId = paneId;
   const act = activePane();
   currentId = act ? act.projectId : null;
-  // 文件/Git 面板展开时跟随激活栏项目：有项目则切换（文件恢复该项目展开状态），空白则不动
+  // 文件/Git 面板展开时跟随激活项目：有项目则切换（文件恢复该项目展开状态），空白则不动
   syncFileDrawerToPane(); syncGitDrawerToPane();
   // 同步标题栏 + 按钮状态 + 左侧高亮 + 激活栏终端 fit/focus
   renderPanes();
@@ -2458,12 +2471,13 @@ function activatePane(kind, paneId) {
   if (!logDrawerPinned) closeLogDrawer();
 }
 
-// 文件面板跟随激活栏：面板展开中且激活栏项目与面板绑定项目不同时切换目录。
-// 激活栏空白/无项目 → 保持当前目录不动（不清空）。
+// 文件面板跟随激活项目：面板展开中且 currentId 与面板绑定项目不同时切换目录。
+// 数据源用 currentId（激活栏项目，或卡片点击激活的项目）而非激活栏本身——
+// 卡片激活的项目可能没有终端窗口（全部分栏取消激活），此时激活栏取不到项目。
+// currentId 空（激活空栏/取消激活）→ 保持当前目录不动（不清空）。
 function syncFileDrawerToPane() {
   if (sideDrawerPanel !== 'file') return;
-  const act = activePane();
-  const pid = act && act.projectId;
+  const pid = currentId;
   if (pid && pid !== fileDrawerProjectId) {
     switchFileDrawerProject(pid);
     renderFileDrawerTitle();
@@ -2472,12 +2486,11 @@ function syncFileDrawerToPane() {
   }
 }
 
-// Git 面板跟随激活栏（与文件面板同语义）：面板展开中且激活栏项目变化时，
-// 切换到该项目并重拉 status/分支/历史；激活栏空白/无项目则保持当前项目不动。
+// Git 面板跟随激活项目（与文件面板同语义）：面板展开中且 currentId 变化时，
+// 切换到该项目并重拉 status/分支/历史；currentId 空则保持当前项目不动。
 function syncGitDrawerToPane() {
   if (sideDrawerPanel !== 'git') return;
-  const act = activePane();
-  const pid = act && act.projectId;
+  const pid = currentId;
   if (pid && pid !== gitDrawerProjectId) {
     openGitDrawer(pid);
   }
@@ -2544,19 +2557,14 @@ function clearDragHints() {
   });
 }
 
-// 把某项目日志显示到日志抽屉的一栏（视图级去重：已有该项目日志栏则激活；否则取目标栏——空栏/新建栏/满栏确认覆盖）。
-// 查看日志即自动展开抽屉。
+// 把某项目日志显示到日志抽屉的一栏（视图级去重：已有该项目日志栏则复用；否则取目标栏——空栏/新建栏/满栏确认覆盖）。
+// 查看日志即自动展开抽屉。日志抽屉与项目激活态彻底解耦：不改 currentId、不联动文件/Git 抽屉。
 async function showProjectLog(projectId) {
   openLogDrawer(); // 查看日志 → 展开抽屉
   const existing = findLogPaneByProject(projectId);
   if (existing) {
-    // 已有该项目日志栏 → 激活它，不重拉（内容已在）
-    activeLogPaneId = existing.id;
-    currentId = projectId;
-    // 文件/Git 面板展开时跟随激活栏项目（此处 currentId 即被查看日志的项目）
-    syncFileDrawerToPane(); syncGitDrawerToPane();
+    // 已有该项目日志栏 → 内容已在，无需重拉
     renderLogPanes();
-    renderList();
     updatePaneLogButtons();
     return;
   }
@@ -2564,19 +2572,7 @@ async function showProjectLog(projectId) {
   if (!target) return; // 用户在满栏确认框选了取消
   target.projectId = projectId;
   target.view = 'log';
-  activeLogPaneId = target.id;
-  buildLogViewForPane(target.id, projectId);
-}
-
-// 把日志视图渲染进指定栏并重拉历史；同步 currentId/标题/按钮/高亮。
-// renderLogPanes 内部会对每个 view==='log' 的栏 renderPaneLogContent（拉历史），
-// 且该函数按 data-log-pane 容器 guard 自然防竞态（栏被移除后丢弃结果），此处无需再拉。
-function buildLogViewForPane(paneId, projectId) {
-  currentId = projectId;
-  // 文件/Git 面板展开时跟随查日志的项目
-  syncFileDrawerToPane(); syncGitDrawerToPane();
   renderLogPanes();
-  renderList();
   updatePaneLogButtons();
 }
 
@@ -2588,7 +2584,7 @@ async function displaySession(projectId, sessionId) {
     // 已在某栏显示 → 激活它，不搬移
     activePaneId = existing.id;
     currentId = existing.projectId || projectId;
-    // 文件/Git 面板展开时跟随激活栏项目
+    // 文件/Git 面板展开时跟随激活项目
     syncFileDrawerToPane(); syncGitDrawerToPane();
     renderPanes();
     renderList();
@@ -2601,7 +2597,7 @@ async function displaySession(projectId, sessionId) {
   target.view = sessionId;
   activePaneId = target.id;
   currentId = projectId;
-  // 文件/Git 面板展开时跟随新会话所在栏的项目
+  // 文件/Git 面板展开时跟随新会话所在项目的激活
   syncFileDrawerToPane(); syncGitDrawerToPane();
   renderPanes();
   renderList();
@@ -2702,15 +2698,16 @@ function renderList() {
       }).join('')}
     </div>` : '';
     // 终端会话区块（新建按钮 + 会话列表）作为项目卡片内的白底子区域；
-    // onclick stopPropagation 阻止冒泡到卡片 selectProject，避免误触切回日志视图/重拉历史。
-    const termBlock = `<div class="term-block" onclick="event.stopPropagation()">
+    // 区块本身不拦截冒泡（空白区点击冒泡到卡片激活），各按钮/会话条目自行 stopPropagation
+    // 并先激活项目再执行各自动作。
+    const termBlock = `<div class="term-block">
         <div class="term-new-row">
-          <button title="文件目录浏览（切换到该项目目录；右键：在资源管理器中打开）" data-project-id="${p.id}" onclick="event.stopPropagation(); openFileDrawer('${p.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showFileBtnContextMenu(event)"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
-          <button title="版本管理（Git / SVN：状态/提交/更新/历史）" onclick="event.stopPropagation(); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
-          <button id="shellBtn-${p.id}" title="打开 cmd（右键：cmd / Git Bash）" onclick="event.stopPropagation(); newTermSession('${p.id}','cmd')" oncontextmenu="event.preventDefault(); event.stopPropagation(); toggleShellMenu(event, '${p.id}')">${CMD_LOGO}</button>
-          <button data-project-id="${p.id}" data-agent-type="claude" title="新建 claude 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','claude')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CLAUDE_LOGO}</button>
-          <button data-project-id="${p.id}" data-agent-type="codex" title="新建 codex 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','codex')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CODEX_LOGO}</button>
-          <button data-project-id="${p.id}" data-agent-type="pi" title="新建 pi 会话（右键：历史会话）" onclick="event.stopPropagation(); newTermSession('${p.id}','pi')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${PI_LOGO}</button>
+          <button title="文件目录浏览（切换到该项目目录；右键：在资源管理器中打开）" data-project-id="${p.id}" onclick="event.stopPropagation(); activateProject('${p.id}'); openFileDrawer('${p.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showFileBtnContextMenu(event)"><svg class="folder-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+          <button title="版本管理（Git / SVN：状态/提交/更新/历史）" onclick="event.stopPropagation(); activateProject('${p.id}'); openGitDrawer('${p.id}')"><svg class="git-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></button>
+          <button id="shellBtn-${p.id}" title="打开 cmd（右键：cmd / Git Bash）" onclick="event.stopPropagation(); activateProject('${p.id}'); newTermSession('${p.id}','cmd')" oncontextmenu="event.preventDefault(); event.stopPropagation(); toggleShellMenu(event, '${p.id}')">${CMD_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="claude" title="新建 claude 会话（右键：历史会话）" onclick="event.stopPropagation(); activateProject('${p.id}'); newTermSession('${p.id}','claude')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CLAUDE_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="codex" title="新建 codex 会话（右键：历史会话）" onclick="event.stopPropagation(); activateProject('${p.id}'); newTermSession('${p.id}','codex')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${CODEX_LOGO}</button>
+          <button data-project-id="${p.id}" data-agent-type="pi" title="新建 pi 会话（右键：历史会话）" onclick="event.stopPropagation(); activateProject('${p.id}'); newTermSession('${p.id}','pi')" oncontextmenu="event.preventDefault(); event.stopPropagation(); showAgentBtnContextMenu(event)">${PI_LOGO}</button>
         </div>
         ${subMenu}
       </div>`;
@@ -2727,15 +2724,19 @@ function renderList() {
     const meta = isFolder
       ? `<div class="meta">${pathCell}</div>`
       : `<div class="meta">${pathCell}<button class="status-btn ${running ? 'running' : 'stopped'}" title="查看日志" onclick="event.stopPropagation(); selectProject('${p.id}')"><span class="dot ${running ? 'running' : 'stopped'}"></span>${running ? 'PID ' + p.pid : '已停止'}</button></div>`;
+    // meta 行路径/meta 区域点击冒泡到卡片激活（第一排按钮在 .project-actions，已各自 stopPropagation）
     const actions = isFolder ? editBtn + delBtn : startBtn + stopBtn + restartBtn + cmdBtn + editBtn + delBtn;
     // 头像节点已随侧栏整体折叠移除；卡片折叠态：只保留一行名称 + 折叠按钮（变展开图标）
     const itemCollapsed = isProjectCollapsed(p.id);
     // 折叠态标记：运行中显示绿点（badge 左侧）；有任意打开会话（claude/codex/pi/cmd 等）整卡变橙
     const hasSessions = sessions.length > 0;
     const runDot = itemCollapsed && running ? `<span class="run-dot"></span>` : '';
+    // 折叠按钮：仅切换折叠/展开（stopPropagation 不触发卡片点击激活）
     const collapseBtn = `<button class="collapse-item-btn" title="${itemCollapsed ? '展开' : '折叠'}" onclick="event.stopPropagation(); toggleProjectCollapsed('${p.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>`;
+    // 整卡可点激活项目：折叠/展开态点击均只激活（折叠/展开只经折叠按钮）。
+    // 第一排运行按钮/折叠按钮 stopPropagation 不激活；meta 行的运行状态按钮只查日志不激活（自行 stopPropagation）。
     return `
-      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''} ${itemCollapsed && hasSessions ? 'has-sessions' : ''}" data-project-id="${p.id}">
+      <div class="project-item ${p.id === currentId ? 'active' : ''} ${itemCollapsed ? 'collapsed' : ''} ${itemCollapsed && hasSessions ? 'has-sessions' : ''}" data-project-id="${p.id}" onclick="onProjectCardClick(event, '${p.id}')">
         <div class="row" oncontextmenu="event.preventDefault(); showProjectCardContextMenu(event)">
           <span class="vcs-logo" id="vcsLogo-${p.id}"></span><span class="name">${escapeHtml(p.name)}</span>
           ${runDot}<span class="badge ${cls}">${typeLabel}</span>
@@ -2766,10 +2767,34 @@ function escapeHtml(s) {
 }
 
 // ---------- 选择项目 ----------
-// 点左侧项目卡片：改写激活栏显示该项目的日志。
-// 若该项目已在某栏显示（日志或会话），激活那一栏并按需置为日志视图，不再复制。
+// 点运行状态按钮：查看该项目日志（只开日志抽屉，不改激活态——日志抽屉与项目激活彻底解耦）。
 async function selectProject(id) {
   showProjectLog(id);
+}
+
+// ---------- 项目卡片点击激活 ----------
+// 点卡片（折叠/展开态均只激活，不改变折叠状态；卡片主体/第二排按钮）激活该项目：
+//   1. 终端激活栏已是该项目 → 不动；
+//   2. 终端分栏中有该项目窗口（可能有多个）→ 激活第一个；
+//   3. 没有 → 终端分栏全部取消激活（栏内容保留，仅去高亮），卡片竖线亮（currentId 驱动）。
+// 未固定的展开日志抽屉跟随收起（与点终端分栏同语义），固定态保持展开。
+function activateProject(id) {
+  const target = panes.find(p => p.projectId === id && p.view !== 'empty');
+  const alreadyActive = target && activePaneId === target.id;
+  if (target) {
+    activePaneId = target.id;
+  } else {
+    activePaneId = null; // 无该项目窗口：全部分栏取消激活（内容保留）
+  }
+  // 已激活该项目窗口：分栏不动，但抽屉跟随仍需执行（抽屉可能被手动切到别的项目）
+  if (alreadyActive) { syncFileDrawerToPane(); syncGitDrawerToPane(); return; }
+  currentId = id;
+  // 文件/Git 面板展开时跟随激活项目（currentId 驱动，无终端窗口也跟随）
+  syncFileDrawerToPane(); syncGitDrawerToPane();
+  renderPanes();
+  renderList();
+  updatePaneLogButtons();
+  if (!logDrawerPinned) closeLogDrawer();
 }
 
 // ---------- 项目卡片拖拽排序 ----------
@@ -2787,6 +2812,9 @@ function onProjectPointerDown(e) {
   if (tgt) return;
   const item = e.target.closest('.project-item');
   if (!item) return;
+  // 记录按下位置：pointerup 未超拖拽阈值 → click 照常触发（onProjectCardClick）；
+  // 超阈值进入拖拽 → click 的位移校验吞掉误触激活
+  projectClickDown = { x: e.clientX, y: e.clientY };
   const list = document.getElementById('sidebarList');
   if (!list) return;
   dragState = {
@@ -5192,9 +5220,11 @@ function openFileDrawer(projectId) {
   // 每个项目独立保留展开层级 + 选中态（fileDrawerStateByProject 状态桶）。
   exitWorkbench(); // 项目卡片入口：与上方按钮一致，先切回终端区再打开抽屉
   if (!projectId) {
-    const act = activePane();
-    if (act && act.projectId) projectId = act.projectId;
-    else projectId = drawerProjectId;
+    // 激活项目（currentId）优先：卡片可激活无终端窗口的项目（激活栏为 null），
+    // 此时激活栏取不到项目；currentId 为空（无激活/空白栏）再回退激活栏、共享指针
+    projectId = currentId
+      || (activePane() && activePane().projectId)
+      || drawerProjectId;
   }
   if (projectId) {
     const incoming = projects.find(x => x.id === projectId);
@@ -5710,9 +5740,10 @@ function openGitDrawer(projectId) {
   //（空白栏/无项目时回退共享指针——文件/Git 两抽屉共用的「前次项目」，可能由任一抽屉写入）
   exitWorkbench(); // 项目卡片入口：与上方按钮一致，先切回终端区再打开抽屉
   if (!projectId) {
-    const act = activePane();
-    if (act && act.projectId) projectId = act.projectId;
-    else projectId = drawerProjectId;
+    // 激活项目（currentId）优先：同 openFileDrawer，卡片激活无窗口项目时激活栏为 null
+    projectId = currentId
+      || (activePane() && activePane().projectId)
+      || drawerProjectId;
   }
   if (projectId) {
     if (gitDrawerProjectId !== projectId) {

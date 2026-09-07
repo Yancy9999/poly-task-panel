@@ -55,10 +55,13 @@ function boot() {
   return window;
 }
 
-// 编译执行按钮的内联 onclick（jsdom outside-only 不编译 HTML 属性事件）
-function fireOnclick(window, btn) {
+// 编译执行按钮的内联 onclick（jsdom outside-only 不编译 HTML 属性事件）。
+// handler 里 activateProject → renderList 整卡重绘后，tooltip 的 MutationObserver
+// 异步把新节点 title 改名 data-tip，须让出事件循环后再查询。
+async function fireOnclick(window, btn) {
   const fn = window.eval(`(function (event) { ${btn.getAttribute('onclick')} })`);
   fn.call(btn, { stopPropagation() {} });
+  await new Promise((r) => setTimeout(r, 0));
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -116,8 +119,8 @@ function assert(cond, msg) {
   const created = [];
   const origNewTerm = window.newTermSession;
   window.newTermSession = (pid, type) => created.push([pid, type]);
-  fireOnclick(window, codexBtn());
-  fireOnclick(window, piBtn());
+  await fireOnclick(window, codexBtn());
+  await fireOnclick(window, piBtn());
   assert(created.length === 2 && created[0][1] === 'codex' && created[1][1] === 'pi', '左键仍直接新建 codex / pi 会话');
 
   // --- codex 右键菜单：一项「历史会话」→ 弹窗 ---

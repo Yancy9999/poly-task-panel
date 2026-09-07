@@ -49,10 +49,13 @@ function boot() {
 }
 
 // 编译执行按钮的内联 onclick（jsdom outside-only 不编译 HTML 属性事件；
-// 用 window.eval 编译才能取到 window 作用域里的函数）
-function fireOnclick(window, btn) {
+// 用 window.eval 编译才能取到 window 作用域里的函数）。
+// handler 里 activateProject → renderList 整卡重绘后，tooltip 的 MutationObserver
+// 异步把新节点 title 改名 data-tip，须让出事件循环后再查询。
+async function fireOnclick(window, btn) {
   const fn = window.eval(`(function (event) { ${btn.getAttribute('onclick')} })`);
   fn.call(btn, { stopPropagation() {} });
+  await new Promise((r) => setTimeout(r, 0));
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,14 +87,14 @@ function assert(cond, msg) {
   let opened = [];
   const origOpenFileDrawer = window.openFileDrawer;
   window.openFileDrawer = (pid) => opened.push(pid);
-  fireOnclick(window, fileBtn('p1'));
+  await fireOnclick(window, fileBtn('p1'));
   assert(opened.join() === 'p1', '文件目录按钮左键打开文件抽屉');
 
   // --- 命令行按钮左键：直接新建 cmd 会话，不再弹菜单 ---
   const created = [];
   const origNewTerm = window.newTermSession;
   window.newTermSession = (pid, type) => created.push([pid, type]);
-  fireOnclick(window, shellBtn('p1'));
+  await fireOnclick(window, shellBtn('p1'));
   assert(created.length === 1 && created[0][0] === 'p1' && created[0][1] === 'cmd', '命令行按钮左键直接新建 cmd 会话');
   assert(!shellBtn('p1').getAttribute('onclick').includes('toggleShellMenu'), '命令行按钮左键不再弹 shell 选择菜单');
   window.newTermSession = origNewTerm;
