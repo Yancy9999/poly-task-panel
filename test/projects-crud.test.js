@@ -75,6 +75,7 @@ const post = (p, b) => request('POST', p, b);
 const put = (p, b) => request('PUT', p, b);
 const del = (p) => request('DELETE', p);
 
+
 // ---- 创建：校验分支 ----
 
 test('创建：缺必填字段 400', async () => {
@@ -160,6 +161,33 @@ test('创建 springboot compileDependencies=false：bat 只有 run 无 compile',
   assert.equal(p.compileDependencies, false);
   const bat = fs.readFileSync(path.join(process.env.__PTP_TMPDIR__, 'appdata', 'PolyTaskPanel', 'projects', `${p.id}.bat`), 'utf8');
   assert.ok(!bat.includes('mvn compile'), '未勾选不编译');
+});
+
+// ---- 创建：工作目录内自动建目录 ----
+
+test('创建：工作目录内不存在的目录自动创建；工作目录外仍 400', async () => {
+  // 默认工作目录 = 软件目录（server.js ROOT_DIR）下 workspace —— 测试里 PROJECTS_FILE
+  // 在 tmpDir，但 ROOT_DIR 仍是仓库根，不能往那写。先 PUT 自定义工作目录到 tmpDir 下。
+  const ws = path.join(tmpDir, 'ws');
+  const rs = await put('/api/settings', { workspaceDir: ws });
+  assert.equal(rs.body.ok, true, '设置工作目录');
+  // 工作目录内、不存在 → 自动创建（含多层）
+  const inner = path.join(ws, 'sub', 'My Proj');
+  const r1 = await post('/api/projects', { name: 'My Proj', projectPath: inner, type: 'folder' });
+  assert.equal(r1.status, 200, '工作目录内不存在自动创建');
+  assert.ok(fs.existsSync(inner) && fs.statSync(inner).isDirectory(), '目录已创建');
+  // 工作目录外、不存在 → 维持 400
+  const outer = path.join(tmpDir, 'elsewhere', 'nope');
+  const r2 = await post('/api/projects', { name: 'x', projectPath: outer, type: 'folder' });
+  assert.equal(r2.status, 400);
+  assert.match(r2.body.msg, /不存在/);
+  assert.ok(!fs.existsSync(outer), '工作目录外不建目录');
+  // 路径是文件（即使在工作目录内）仍 400
+  const filePath = path.join(ws, 'plain.txt');
+  fs.writeFileSync(filePath, 'x');
+  const r3 = await post('/api/projects', { name: 'x', projectPath: filePath, type: 'folder' });
+  assert.equal(r3.status, 400);
+  assert.match(r3.body.msg, /不是目录/);
 });
 
 // ---- command 路由 ----

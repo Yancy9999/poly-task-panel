@@ -282,6 +282,9 @@ rebuildProjectsIndex();
 // 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响。
 const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
 // 默认字体与前端 FONT_PRESETS[0].value 保持一致（前端自定义字体时存的是完整 font-family 串）
+// workspaceDir：新建项目默认根目录。null = 未自定义，读取端回退默认（软件目录下 workspace）；
+// 自定义时存绝对路径。DEFAULT_SETTINGS 里只放占位（ROOT_DIR 定义在后），实际默认值由
+// defaultWorkspaceDir() 惰性计算。
 const DEFAULT_SETTINGS = {
   fontFamily: '"Cascadia Code", Consolas, monospace',
   fontSize: 13,
@@ -292,7 +295,20 @@ const DEFAULT_SETTINGS = {
   cmdQuickTexts: null,
   fileHideList: DEFAULT_FILE_HIDE_LIST.slice(),
   projectCollapsed: {},
+  workspaceDir: null,
 };
+// 工作目录默认值：软件所在目录下的 workspace（惰性计算，调用时 ROOT_DIR 已就绪）
+function defaultWorkspaceDir() {
+  return path.join(ROOT_DIR, 'workspace');
+}
+// workspaceDir 归一：非空字符串 trim 后转绝对路径；空白/非法类型存 null（读取端回默认）。
+// 自定义值不校验存在性：目录可以尚未创建（创建项目时按需自动建）。
+function sanitizeWorkspaceDir(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  return path.resolve(s);
+}
 // 命令列表归一：[{cmd,desc}]，cmd 非空字符串；空列表/非法结构存 null（读取端回退默认命令集）
 function sanitizeCommandList(list) {
   if (!Array.isArray(list)) return null;
@@ -347,6 +363,7 @@ function normalizeSettings(raw) {
     cmdQuickTexts: sanitizeQuickTexts(src.cmdQuickTexts),
     fileHideList: sanitizeFileHideList(src.fileHideList),
     projectCollapsed: sanitizeProjectCollapsed(src.projectCollapsed),
+    workspaceDir: sanitizeWorkspaceDir(src.workspaceDir),
   };
 }
 function loadSettings() {
@@ -1022,14 +1039,30 @@ app.post('/api/projects', (req, res) => {
   if (type === 'springboot' && !moduleName) {
     return res.status(400).json({ ok: false, msg: 'SpringBoot 项目需要入口模块名' });
   }
-  // 只校验路径存在，不查工具链
+  // 只校验路径存在，不查工具链。目录不存在时仅当位于工作目录内才自动创建
+  // （新建项目默认落 workspace 下，按需建；工作目录外维持「必须已存在」，
+  // 防手滑拼错路径悄悄建一堆目录）。判定用请求时刻的即时生效工作目录。
+  const effectiveWs = settings.workspaceDir || defaultWorkspaceDir();
   try {
     const st = fs.statSync(projectPath);
     if (!st.isDirectory()) {
       return res.status(400).json({ ok: false, msg: '路径不是目录' });
     }
   } catch (e) {
-    return res.status(400).json({ ok: false, msg: '项目目录不存在: ' + e.message });
+    const resolved = path.resolve(projectPath);
+    const rel = path.relative(effectiveWs, resolved);
+    // 在工作目录内：跨盘符时 path.relative 返回绝对路径；首段恰为 '..' 表示在外层。
+    // 注意 "..foo" 这类名字不是逃逸，须按首段精确比较而非 startsWith('..')。
+    const first = rel.split(path.sep)[0];
+    if (!path.isAbsolute(rel) && first !== '..') {
+      try {
+        fs.mkdirSync(resolved, { recursive: true });
+      } catch (mkErr) {
+        return res.status(400).json({ ok: false, msg: '自动创建项目目录失败: ' + mkErr.message });
+      }
+    } else {
+      return res.status(400).json({ ok: false, msg: '项目目录不存在: ' + e.message });
+    }
   }
 
   const p = {
@@ -1208,17 +1241,30 @@ app.post('/api/projects/:id/explorer', (req, res) => {
 // PUT 做白名单 + 归一（normalizeSettings），多余字段与非法值一律丢弃/回默认。
 // ---------------------------------------------------------------------------
 app.get('/api/settings', (req, res) => {
-  res.json({ ok: true, settings });
+  // workspaceDir 空值时返回默认路径（软件目录下 workspace），前端无需感知「null=默认」约定
+  res.json({
+    ok: true,
+    settings: { ...settings, workspaceDir: settings.workspaceDir || defaultWorkspaceDir() },
+  });
 });
 app.put('/api/settings', (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
-  settings = normalizeSettings(body);
+  // workspaceDir 未随载荷携带（如旧版前端 / 一次性迁移 PUT）时保留现值；
+  // 显式 null/空串仍是「恢复默认」。避免缺键 PUT 悄悄重置用户已自定义的工作目录。
+  const bodyWithWs = 'workspaceDir' in body
+    ? body
+    : { ...body, workspaceDir: settings.workspaceDir };
+  settings = normalizeSettings(bodyWithWs);
   try {
     saveSettings(settings);
   } catch (e) {
     return res.status(500).json({ ok: false, msg: '保存设置失败: ' + (e.message || '') });
   }
-  res.json({ ok: true, settings });
+  // 与 GET 一致：workspaceDir 空值回填默认路径，前端保存后回显的即当前生效值
+  res.json({
+    ok: true,
+    settings: { ...settings, workspaceDir: settings.workspaceDir || defaultWorkspaceDir() },
+  });
 });
 
 // 文件目录浏览：列出某项目目录（或其子目录）下的一层条目，供右侧文件浏览抽屉懒加载树。

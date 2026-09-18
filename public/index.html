@@ -512,7 +512,7 @@
   .pane-status .slash-btn.show, .pane-status .text-btn.show { display: inline-flex; }
   .pane-status .slash-btn:hover, .pane-status .text-btn:hover { background: #3a3c3f; color: #e3e3e3; }
   /* 「/」按钮弹出的常用命令列表：状态栏上方，深色与终端区一致 */
-  .cmd-pop { position: absolute; left: 6px; bottom: 29px; width: 300px; max-height: 280px; overflow-y: auto; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 60; }
+  .cmd-pop { position: absolute; left: 6px; bottom: 29px; width: max-content; min-width: 300px; max-width: calc(100% - 12px); max-height: 280px; overflow-y: auto; background: #2a2e33; border: 1px solid #3a3c3f; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); padding: 4px; z-index: 60; }
   .cmd-pop .cmd-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
   .cmd-pop .cmd-item:hover { background: #3a3c3f; }
   .cmd-pop .cmd-item .cmd-name { flex-shrink: 0; font-family: var(--app-font-family); font-size: 13px; color: #79a8ff; white-space: nowrap; }
@@ -1070,12 +1070,12 @@
     <h2 id="modalTitle">创建项目</h2>
     <div class="field">
       <label>项目名称</label>
-      <input id="fName" placeholder="例如：我的后端服务">
+      <input id="fName" placeholder="例如：我的后端服务" oninput="updateDefaultProjectPath()">
     </div>
     <div class="field">
       <label>项目目录</label>
       <div class="path-row">
-        <input id="fPath" placeholder="例如：D:\projects\my-backend">
+        <input id="fPath" placeholder="例如：D:\projects\my-backend" oninput="markPathTouched()">
         <button type="button" class="path-pick" id="btnPickFolder" onclick="pickFolder()">选择</button>
       </div>
     </div>
@@ -1339,6 +1339,7 @@
         <button type="button" class="settings-nav-item" data-settings-tab="commands" onclick="switchSettingsTab('commands')">命令</button>
         <button type="button" class="settings-nav-item" data-settings-tab="texts" onclick="switchSettingsTab('texts')">常用文本</button>
         <button type="button" class="settings-nav-item" data-settings-tab="files" onclick="switchSettingsTab('files')">文件</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="workspace" onclick="switchSettingsTab('workspace')">工作目录</button>
         <button type="button" class="settings-nav-item" data-settings-tab="about" onclick="switchSettingsTab('about')">关于</button>
       </div>
       <div class="settings-content">
@@ -1401,6 +1402,18 @@
             <label>隐藏名单</label>
             <textarea id="setFileHideList" rows="7" spellcheck="false"></textarea>
             <button type="button" class="reset-cmd-btn" onclick="resetFileHideListText()">恢复默认</button>
+          </div>
+        </div>
+        <div class="settings-tab" id="settingsTabWorkspace" style="display:none">
+          <h2>工作目录</h2>
+          <div class="set-hint" style="margin-bottom:12px">新建项目的默认根目录，默认为软件目录下的 <b>workspace</b>。创建项目时目录自动定位到 <b>工作目录\项目名</b>（不存在时自动创建）；手动「选择」其它已有目录则按原逻辑处理，不自动创建。</div>
+          <div class="field">
+            <label>工作目录</label>
+            <div class="path-row">
+              <input id="setWorkspaceDir" placeholder="例如：D:\projects">
+              <button type="button" class="path-pick" id="btnPickWorkspace" onclick="pickWorkspaceDir()">选择</button>
+            </div>
+            <button type="button" class="reset-cmd-btn" onclick="resetWorkspaceDir()">恢复默认</button>
           </div>
         </div>
         <div class="settings-tab" id="settingsTabAbout" style="display:none">
@@ -3490,7 +3503,9 @@ const FONT_PRESETS = [
 const CUSTOM_FONT_KEY = '__custom__';
 // 文件树黑名单默认值：精确匹配条目名（非前缀），.gitignore / .env 等不受影响
 const DEFAULT_FILE_HIDE_LIST = ['.git', '.svn'];
-const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, agentQuickTexts: null, cmdQuickTexts: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice(), projectCollapsed: {} };
+// 工作目录：新建项目默认根。null = 未自定义（接口返回软件目录下 workspace 的默认绝对路径，
+// 前端始终拿到生效值，不感知 null 约定）；自定义时存绝对路径。
+const DEFAULT_SETTINGS = { fontFamily: FONT_PRESETS[0].value, fontSize: 13, claudeCommands: null, codexCommands: null, piCommands: null, agentQuickTexts: null, cmdQuickTexts: null, fileHideList: DEFAULT_FILE_HIDE_LIST.slice(), projectCollapsed: {}, workspaceDir: '' };
 const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 24;
 
 // 命令列表 <-> 设置页 textarea 文本：每行一条「命令|中文说明」，说明可省略；空行忽略。
@@ -3543,6 +3558,8 @@ function normalizeLocalSettings(raw) {
     agentQuickTexts: sanitizeQuickTextList(src.agentQuickTexts),
     cmdQuickTexts: sanitizeQuickTextList(src.cmdQuickTexts),
     fileHideList,
+    // 工作目录：非空字符串才收（服务端已归一，这里兜底）；空/非法回空串 = 未自定义
+    workspaceDir: typeof src.workspaceDir === 'string' ? src.workspaceDir.trim() : '',
     // 折叠 map 归一：只保留真值条目（值统一 1），非法结构回空对象（与服务端 sanitizeProjectCollapsed 对齐）
     projectCollapsed: (src.projectCollapsed && typeof src.projectCollapsed === 'object' && !Array.isArray(src.projectCollapsed))
       ? Object.fromEntries(Object.entries(src.projectCollapsed).filter(([k, v]) => k && typeof k === 'string' && v).map(([k]) => [k, 1]))
@@ -3663,6 +3680,8 @@ async function openSettingsModal() {
   document.getElementById('setCmdQuickTexts').value = (termSettings.cmdQuickTexts || []).join('\n');
   // 文件页：黑名单每行一条回填
   document.getElementById('setFileHideList').value = (termSettings.fileHideList || []).join('\n');
+  // 工作目录页：回显当前生效路径（服务端已把未自定义值解析为默认路径）
+  document.getElementById('setWorkspaceDir').value = termSettings.workspaceDir || '';
   updateSettingsPreview();
   switchSettingsTab('font'); // 每次打开默认落在「字体」页
   document.getElementById('settingsOverlay').classList.add('show');
@@ -3682,6 +3701,7 @@ function switchSettingsTab(tab) {
   document.getElementById('settingsTabCommands').style.display = tab === 'commands' ? '' : 'none';
   document.getElementById('settingsTabTexts').style.display = tab === 'texts' ? '' : 'none';
   document.getElementById('settingsTabFiles').style.display = tab === 'files' ? '' : 'none';
+  document.getElementById('settingsTabWorkspace').style.display = tab === 'workspace' ? '' : 'none';
   document.getElementById('settingsTabAbout').style.display = tab === 'about' ? '' : 'none';
   document.getElementById('settingsSaveBtn').style.display = tab === 'about' ? 'none' : '';
   if (tab === 'about') loadAboutContent();
@@ -3697,6 +3717,35 @@ function resetCommandsText(type) {
 // 文件页「恢复默认」：仅回填 textarea（未落盘），点「保存」才生效。
 function resetFileHideListText() {
   document.getElementById('setFileHideList').value = DEFAULT_FILE_HIDE_LIST.join('\n');
+}
+
+// 工作目录页「选择」：复用后端 pick-folder（对话框默认定位输入框当前目录）。
+// 选完仅回填输入框（未落盘），点「保存」才生效；空输入框 = 恢复默认。
+async function pickWorkspaceDir() {
+  const input = document.getElementById('setWorkspaceDir');
+  const btn = document.getElementById('btnPickWorkspace');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/pick-folder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: input.value.trim() }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      input.value = data.path;
+    } else if (!data.canceled) {
+      showToast(data.msg || '选择文件夹失败', 'error');
+    }
+  } catch (e) {
+    showToast('选择文件夹失败', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 工作目录页「恢复默认」：清空输入框（未落盘），点「保存」后存 null（读取端回默认）。
+function resetWorkspaceDir() {
+  document.getElementById('setWorkspaceDir').value = '';
 }
 
 // 关于页内容：fetch 根目录 ABOUT.md（server 路由 /about.md），本地轻量渲染。
@@ -3824,6 +3873,9 @@ async function saveSettings() {
   // 文件黑名单：每行一条名称，去空行/去重；全空回退默认
   const hideRaw = document.getElementById('setFileHideList').value.split('\n').map(s => s.trim()).filter(Boolean);
   termSettings.fileHideList = hideRaw.length ? [...new Set(hideRaw)] : DEFAULT_FILE_HIDE_LIST.slice();
+  // 工作目录：空 = 恢复默认（存 null，服务端解析为软件目录下 workspace）；非空原样上送（服务端归一为绝对路径）
+  const wsRaw = document.getElementById('setWorkspaceDir').value.trim();
+  termSettings.workspaceDir = wsRaw || null;
   // 持久化到服务端 settings.json（不再写 localStorage）
   try {
     const res = await fetch('/api/settings', {
@@ -3963,10 +4015,29 @@ function showConfirm(msg, title = '确认操作', opts = {}) {
 }
 
 // ---------- 模态框 ----------
+// 项目名 → Windows 文件名非法字符（\ / : * ? " < > |）替换为下划线（目录名用，项目名本身不变）；
+// 尾部的点/空格会被资源管理器静默剥掉（导致配置路径与实际目录不一致），一并替换为下划线
+function sanitizeDirName(name) {
+  return String(name || '').replace(/[\\/:*?"<>|]/g, '_').replace(/[. ]+$/, (m) => '_'.repeat(m.length));
+}
+// 创建弹窗路径实时跟随：输入项目名时路径自动变 <工作目录>\<项目名>；
+// 一旦手动改过路径（input 或「选择」），置 fPathTouched 停止跟随，编辑弹窗不跟随。
+let fPathTouched = false;
+function updateDefaultProjectPath() {
+  if (fPathTouched) return;
+  const name = document.getElementById('fName').value.trim();
+  const ws = (termSettings.workspaceDir || '').replace(/[\\/]+$/, '');
+  document.getElementById('fPath').value = name ? (ws ? ws + '\\' + sanitizeDirName(name) : '') : '';
+}
+function markPathTouched() {
+  fPathTouched = true;
+}
 function openCreateModal() {
   editingId = null;
+  fPathTouched = false;
   document.getElementById('modalTitle').textContent = '创建项目';
   document.getElementById('fName').value = '';
+  // 路径留空，随项目名输入实时跟随（fName 的 oninput → updateDefaultProjectPath）
   document.getElementById('fPath').value = '';
   document.getElementById('fCommand').value = '';
   document.getElementById('fModule').value = '';
@@ -3984,6 +4055,7 @@ function openEditModal(id) {
   if (!p) return;
   if (p.running) { showToast('项目运行中，请先停止再编辑', 'warning'); return; }
   editingId = id;
+  fPathTouched = true; // 编辑不跟随项目名：路径保持原值
   document.getElementById('modalTitle').textContent = '编辑项目';
   document.getElementById('fName').value = p.name;
   document.getElementById('fPath').value = p.projectPath;
@@ -4030,6 +4102,7 @@ async function pickFolder() {
     const data = await resp.json();
     if (data.ok) {
       input.value = data.path;
+      markPathTouched(); // 手动选过目录后停止项目名跟随
     } else if (!data.canceled) {
       showToast(data.msg || '选择文件夹失败', 'error');
     }

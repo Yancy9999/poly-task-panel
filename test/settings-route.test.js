@@ -105,6 +105,11 @@ test('PUT：合法配置落盘，GET 回读一致，文件写入 settings.json',
   assert.deepStrictEqual(s.cmdQuickTexts, ['dir']);
   // 白名单之外的字段被过滤
   assert.strictEqual(s.evil, undefined);
+  // 本用例未传 workspaceDir：归一为 null（未自定义），接口回填默认路径
+  assert.strictEqual(s.workspaceDir, path.join(path.resolve(__dirname, '..'), 'workspace'));
+  // 落盘仍为 null（未自定义），读取端回默认
+  const onDiskWs = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.strictEqual(onDiskWs.workspaceDir, null);
 
   // 回读
   const r = await get('/api/settings');
@@ -142,6 +147,58 @@ test('PUT 后 /files 默认黑名单联动：fileHideList=node_modules 时 .git 
   const names = r.body.items.map(i => i.name);
   assert.ok(names.includes('.git'), '新黑名单不含 .git，应显示');
   assert.ok(names.includes('.gitignore'), '.gitignore 应显示');
+});
+
+// --- workspaceDir（工作目录：新建项目默认根）---
+
+test('GET：workspaceDir 默认为软件目录下 workspace 的绝对路径', async () => {
+  const r = await get('/api/settings');
+  const s = r.body.settings;
+  assert.ok(path.isAbsolute(s.workspaceDir), '是绝对路径: ' + s.workspaceDir);
+  assert.strictEqual(path.basename(s.workspaceDir), 'workspace');
+});
+
+test('PUT：自定义 workspaceDir 落盘回读；空值存 null 且接口返回默认路径', async () => {
+  const custom = path.join(tmpDir, 'myws');
+  const r1 = await put({ workspaceDir: custom });
+  assert.strictEqual(r1.body.settings.workspaceDir, custom, 'PUT 返回生效路径');
+  // 回读一致
+  const g1 = await get('/api/settings');
+  assert.strictEqual(g1.body.settings.workspaceDir, custom);
+  // 落盘为自定义绝对路径
+  let onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.strictEqual(onDisk.workspaceDir, custom);
+  // 相对路径归一为绝对路径
+  const r2 = await put({ workspaceDir: 'rel-ws' });
+  assert.ok(path.isAbsolute(r2.body.settings.workspaceDir), '相对路径归一为绝对路径');
+  assert.strictEqual(path.basename(r2.body.settings.workspaceDir), 'rel-ws');
+  // 空白值 → 存 null（未自定义），接口返回默认（软件目录下 workspace）
+  const r3 = await put({ workspaceDir: '   ' });
+  assert.strictEqual(r3.body.settings.workspaceDir, path.join(path.resolve(__dirname, '..'), 'workspace'));
+  onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.strictEqual(onDisk.workspaceDir, null, '空值落盘为 null');
+});
+
+test('PUT：workspaceDir 非法类型（数字/数组）回默认 null', async () => {
+  for (const bad of [42, ['x'], {}]) {
+    const r = await put({ workspaceDir: bad });
+    assert.strictEqual(r.body.settings.workspaceDir, path.join(path.resolve(__dirname, '..'), 'workspace'),
+      `非法值 ${JSON.stringify(bad)} 回默认`);
+  }
+  const onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  assert.strictEqual(onDisk.workspaceDir, null);
+});
+
+test('PUT：载荷缺 workspaceDir 键保留现值；显式空串恢复默认', async () => {
+  // 先设自定义值
+  const custom = path.join(tmpDir, 'keep-ws');
+  await put({ workspaceDir: custom });
+  // 缺键 PUT（模拟旧版前端/迁移请求）：不应重置已自定义的工作目录
+  const r1 = await put({ fontSize: 14 });
+  assert.strictEqual(r1.body.settings.workspaceDir, custom, '缺键保留现值');
+  // 显式空串 = 恢复默认
+  const r2 = await put({ workspaceDir: '' });
+  assert.strictEqual(r2.body.settings.workspaceDir, path.join(path.resolve(__dirname, '..'), 'workspace'), '显式空串恢复默认');
 });
 
 // --- projectCollapsed（项目卡片折叠状态，服务端持久化）---
