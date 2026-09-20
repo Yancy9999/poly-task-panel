@@ -2096,6 +2096,12 @@ async function reconnectSessionPanes() {
   isInitialSync = false;
 }
 
+// 强制 xterm 全量重绘可视区：DOM 渲染器不感知宿主节点被跨栏搬移/尺寸变化，
+// fit 只更新 cols/rows 数值不重绘已渲染文本——多栏切换后文字错位、滚动残留均源于此。
+function refreshTerm(s) {
+  try { s.term.refresh(0, s.term.rows - 1); } catch (e) {}
+}
+
 // 面板尺寸变化：fit 所有被显示到终端分栏里的 xterm 并把真实 cols/rows 同步给后端 PTY。
 function fitAndResize() {
   panes.forEach(p => {
@@ -2103,6 +2109,7 @@ function fitAndResize() {
     const s = termSessions.get(p.view);
     if (!s) return;
     try { s.fit.fit(); } catch (e) {}
+    refreshTerm(s);
     syncPtyResize(s, p.view);
   });
 }
@@ -2239,6 +2246,7 @@ function renderPanes() {
       const s = termSessions.get(p.view);
       if (!s) return;
       try { s.fit.fit(); } catch (e) {}
+      refreshTerm(s); // 宿主节点跨栏搬移后 DOM 渲染器不感知，fit 不重绘已渲染文本，必须强制全量重绘
       syncPtyResize(s, p.view);
     });
     const act = activePane();

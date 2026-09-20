@@ -417,6 +417,28 @@ function projectBatPath(projectId) {
   return path.join(LOGS_DIR, `${projectId}.bat`);
 }
 
+// ---------------------------------------------------------------------------
+// 后端崩溃日志：未捕获异常/未处理的 Promise 拒绝落到 backend.log（与项目日志同目录）。
+// 背景：壳层 spawn node 时 stdout/stderr 无人接，console.error 全部丢弃，
+// 后端抛未捕获异常就"静默死掉、事后查无痕迹"。落盘文件让事后归因成为可能。
+// 注意：只记录不退出——uncaughtException 后进程状态不可信，但面板是本地工具，
+// 带着异常继续服务比直接消失对用户更友好；真正的原生层崩溃（node-pty C++ assert、
+// V8 fatal）不走 JS 钩子，由 Rust 壳把 stdout/stderr 重定向到同一文件兜底。
+// ---------------------------------------------------------------------------
+const BACKEND_LOG = path.join(path.dirname(LOGS_DIR), 'backend.log');
+function appendCrashLog(kind, err) {
+  const line = `[${new Date().toISOString()}] [${kind}] ${err && err.stack ? err.stack : String(err)}\n`;
+  try { fs.appendFileSync(BACKEND_LOG, line); } catch (e) {}
+}
+process.on('uncaughtException', (err) => {
+  appendCrashLog('uncaughtException', err);
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  appendCrashLog('unhandledRejection', reason);
+  console.error('[unhandledRejection]', reason);
+});
+
 function ensureBuffer(projectId) {
   if (!runs.has(projectId)) {
     runs.set(projectId, { proc: null, pid: null, pendingFlush: '' });

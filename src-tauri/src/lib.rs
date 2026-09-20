@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -120,11 +121,23 @@ pub fn main() {
             };
 
             //    CREATE_NO_WINDOW：抑制 node（控制台程序）弹出黑窗口。
+            //    stdout/stderr 追加重定向到 backend.log：server.js 的 console 输出与
+            //    原生层崩溃（node-pty C++ assert、V8 fatal——不走 JS 的
+            //    uncaughtException 钩子，只留在进程输出流）事后都有据可查。
+            //    与 server.js 落盘的 uncaughtException 兜底写同一个文件，一处看全。
+            let log_path = server_dir.join("backend.log");
+            let log_file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)?;
+            let log_err = log_file.try_clone()?;
             let child = std::process::Command::new(&node_exe)
                 .arg("server.js")
                 .arg(format!("--port={}", port))
                 .current_dir(&server_dir)
                 .envs(std::env::vars())
+                .stdout(std::process::Stdio::from(log_file))
+                .stderr(std::process::Stdio::from(log_err))
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn()?;
 
