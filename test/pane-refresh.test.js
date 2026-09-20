@@ -1,6 +1,8 @@
-// 分栏切换后 xterm 需全量重绘：renderPanes/fitAndResize 在 fit 之后必须调 term.refresh(0, rows-1)。
-// 背景：xterm 6.0 默认 DOM 渲染器不感知 .term-host 跨栏搬移，fit 只改 cols/rows 不重绘，
-// 导致多栏来回切换后文字错位（cols 与视觉宽度错开）、滚动后旧渲染行残留（鬼影）。
+// 分栏切换后 xterm 需全量硬重绘：renderPanes/fitAndResize 在 fit 之后必须经 refreshTerm
+// 调 _renderService.clear() + handleResize(cols, rows) + term.refresh(0, rows-1)。
+// 背景：xterm 6.0 默认 DOM 渲染器不感知 .term-host 跨栏搬移，fit 在 cols/rows 数值未变时
+// 跳过 resize（行宽不重算 → 文字错位），且 refresh 只重绘传入行不清旧行（滚动鬼影）。
+// 单调 term.refresh 不够，必须驱动 _renderService 硬重绘（见 public/index.html refreshTerm）。
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
@@ -20,11 +22,18 @@ const { window } = dom;
 
 window.fetch = async () => ({ json: async () => [] });
 window.WebSocket = class { constructor() {} send() {} close() {} };
-// Terminal stub：refresh(cols 起始行, 结束行) 记录调用，供断言 fit 后被触发。
+// Terminal stub：refresh(cols 起始行, 结束行) 记录调用，供断言 fit 后被触发；
+// _core._renderService 记录 clear/handleResize 调用，供断言硬重绘链路完整。
 window.Terminal = class {
   constructor() {
+    this.cols = 80;
     this.rows = 24;
     this.refreshCalls = [];
+    this.renderServiceCalls = [];
+    this._core = { _renderService: {
+      clear: () => this.renderServiceCalls.push('clear'),
+      handleResize: (cols, rows) => this.renderServiceCalls.push(['handleResize', cols, rows]),
+    } };
     this.textarea = { addEventListener() {} };
   }
   refresh(start, end) { this.refreshCalls.push([start, end]); }
@@ -65,29 +74,33 @@ function assert(cond, msg) {
   P.push({ id: 'p2', projectId: 'A', view: 'c_2' });
   window.__setActive('p1');
 
-  // --- 1. renderPanes 后：所有显示中的会话都被 refresh(0, rows-1) 全量重绘 ---
+  // --- 1. renderPanes 后：所有显示中的会话都被硬重绘（clear + handleResize + refresh 全量） ---
   window.document.getElementById('consoleBody').innerHTML = '';
   window.renderPanes();
   await wait(10); // rAF 已被 stub 为 setTimeout 0
   const t1 = window.__termSessions.get('c_1').term;
   const t2 = window.__termSessions.get('c_2').term;
+  const hardRedrawn = (t) =>
+    t.renderServiceCalls.includes('clear') &&
+    t.renderServiceCalls.some((c) => Array.isArray(c) && c[0] === 'handleResize' && c[1] === t.cols && c[2] === t.rows) &&
+    t.refreshCalls.some(([s, e]) => s === 0 && e === t.rows - 1);
   assert(
-    t1.refreshCalls.some(([s, e]) => s === 0 && e === t1.rows - 1),
-    'renderPanes 后会话1 refresh(0, rows-1) 被调用'
+    hardRedrawn(t1),
+    'renderPanes 后会话1 clear + handleResize + refresh(0, rows-1) 被调用'
   );
   assert(
-    t2.refreshCalls.some(([s, e]) => s === 0 && e === t2.rows - 1),
-    'renderPanes 后会话2（非激活栏）refresh(0, rows-1) 被调用'
+    hardRedrawn(t2),
+    'renderPanes 后会话2（非激活栏）clear + handleResize + refresh(0, rows-1) 被调用'
   );
 
-  // --- 2. fitAndResize 后同样触发 refresh ---
+  // --- 2. fitAndResize 后同样触发硬重绘 ---
   t1.refreshCalls.length = 0; t2.refreshCalls.length = 0;
+  t1.renderServiceCalls.length = 0; t2.renderServiceCalls.length = 0;
   window.__fitAndResize();
   await wait(10);
   assert(
-    t1.refreshCalls.some(([s, e]) => s === 0 && e === t1.rows - 1) &&
-    t2.refreshCalls.some(([s, e]) => s === 0 && e === t2.rows - 1),
-    'fitAndResize 后两个显示中的会话均 refresh(0, rows-1)'
+    hardRedrawn(t1) && hardRedrawn(t2),
+    'fitAndResize 后两个显示中的会话均 clear + handleResize + refresh(0, rows-1)'
   );
 
   // --- 3. 空白栏不触发 refresh（无会话） ---
